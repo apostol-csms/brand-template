@@ -186,9 +186,9 @@ reload_secrets() {
   [[ -x "$VAULT" ]] || { err "$VAULT missing or not executable"; exit 1; }
   run env WORKDIR="$WORKDIR" SCRIPT_DIR="$SCRIPT_DIR" BRAND_ENV="$BRAND_ENV" "$VAULT"
   if [[ $DRY_RUN -eq 0 ]]; then
-    if grep -q 'CHANGE_ME' "$WORKDIR/.env"; then
+    if grep -qE '^[A-Z_][A-Z_0-9]*=("?)CHANGE_ME\1$' "$WORKDIR/.env"; then
       err "workdir/.env still contains CHANGE_ME:"
-      grep -n 'CHANGE_ME' "$WORKDIR/.env" | head -5 >&2
+      grep -nE '^[A-Z_][A-Z_0-9]*=("?)CHANGE_ME\1$' "$WORKDIR/.env" | head -5 >&2
       exit 1
     fi
     # Re-pin PLATFORM_VERSION in case lock changed.

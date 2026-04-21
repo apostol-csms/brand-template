@@ -221,9 +221,9 @@ load_secrets() {
     "$SCRIPT_DIR/envs/$BRAND_ENV/secrets/load-from-vault.sh"
   if [[ $DRY_RUN -eq 1 ]]; then return 0; fi
   [[ -s "$WORKDIR/.env" ]] || { err "workdir/.env missing or empty after secrets load"; exit 1; }
-  if grep -q 'CHANGE_ME' "$WORKDIR/.env"; then
+  if grep -qE '^[A-Z_][A-Z_0-9]*=("?)CHANGE_ME\1$' "$WORKDIR/.env"; then
     err "workdir/.env still contains CHANGE_ME placeholders:"
-    grep -n 'CHANGE_ME' "$WORKDIR/.env" | head -5 >&2
+    grep -nE '^[A-Z_][A-Z_0-9]*=("?)CHANGE_ME\1$' "$WORKDIR/.env" | head -5 >&2
     err "The secrets provider did not populate every required value."
     exit 1
   fi
