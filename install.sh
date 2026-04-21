@@ -318,6 +318,32 @@ run_hook() {
   done
 }
 
+# ─── Step 11b: Render app env files ──────────────────────────────────
+#
+# After the platform sources are cloned into workdir/, brands often need
+# to materialize per-app env files that containers read at runtime:
+#   workdir/db/sql/.env.psql, .env.key.psql, .env.branding.psql
+#   workdir/frontend/{webapp,driver,pay}/.env*
+# (landing is typically a sibling repo, not under workdir/frontend/).
+#
+# This step delegates to `envs/<env>/render.sh` if executable. Brands
+# implement it to either:
+#   a) envsubst from *.template files committed in the brand-repo, or
+#   b) copy pre-rendered files from a sibling .secrets/<env>/ tree.
+#
+# Default (no render.sh): skip; compose build will fail later if apps
+# need those env files and they're absent.
+
+render_app_env() {
+  local RENDER="$SCRIPT_DIR/envs/$BRAND_ENV/render.sh"
+  if [[ -x "$RENDER" ]]; then
+    log "render app env via envs/$BRAND_ENV/render.sh"
+    run env WORKDIR="$WORKDIR" SCRIPT_DIR="$SCRIPT_DIR" BRAND_ENV="$BRAND_ENV" "$RENDER"
+  else
+    log "no envs/$BRAND_ENV/render.sh — skipping app-env rendering"
+  fi
+}
+
 # ─── Step 12: Verify ─────────────────────────────────────────────────
 
 record_current_env() {
@@ -356,6 +382,7 @@ load_platform_lock
 merge_env
 load_secrets
 clone_sources
+render_app_env
 pull_images
 run_hook pre-install.sh
 build_local

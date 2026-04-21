@@ -290,6 +290,23 @@ record_version() {
   echo "$PLATFORM_VERSION" > "$WORKDIR/.installed-version"
 }
 
+# ─── Step 6b: Render app env files ───────────────────────────────────
+#
+# After workdir/{db,frontend} are updated to the new refs, brands may
+# need to re-render per-app env files (see install.sh for the contract).
+# Typically a no-op on updates unless secrets rotated or a template
+# gained new variables.
+
+render_app_env() {
+  local RENDER="$SCRIPT_DIR/envs/$BRAND_ENV/render.sh"
+  if [[ -x "$RENDER" ]]; then
+    log "render app env via envs/$BRAND_ENV/render.sh"
+    run env WORKDIR="$WORKDIR" SCRIPT_DIR="$SCRIPT_DIR" BRAND_ENV="$BRAND_ENV" "$RENDER"
+  else
+    log "no envs/$BRAND_ENV/render.sh — skipping"
+  fi
+}
+
 # ─── Step 12: Verify ─────────────────────────────────────────────────
 
 verify_update() {
@@ -326,6 +343,7 @@ diff_compose_and_exit        # exits if --diff-compose
 reload_secrets
 pull_images
 update_sources
+render_app_env
 run_hook pre-update.sh
 rebuild_local
 run_db_migrate
