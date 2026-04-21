@@ -1,0 +1,11 @@
+{
+  "platform_version": "0.9.0-alpha",
+  "images": {
+    "csms-backend": "ghcr.io/apostol-csms/csms-backend:0.9.0-alpha@sha256:e3ffa5b206dc9a6af7353325ae9cc844c719be79c642e7d52ed4fd5374e34bb6",
+    "csms-ocpp":    "ghcr.io/apostol-csms/csms-ocpp:0.9.0-alpha@sha256:0a4c873fe9f4983f59610f6c3ba302815b7f5d630f3274361a1f9b41b18bfe37"
+  },
+  "sources": {
+    "apostol-csms/db":       { "ref": "v0.9.0-alpha", "commit": "c41bd71545210cec6350be324d5117a06489b36d" },
+    "apostol-csms/frontend": { "ref": "v0.9.0-alpha", "commit": "8fa3a0eb7f8f9018dc2677489dd55066a93880e9" }
+  }
+}
