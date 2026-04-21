@@ -1,0 +1,336 @@
+# Apostol CSMS — brand deployment compose.
+#
+# Image-based deployment: platform binaries pulled from GHCR, database
+# layer + frontend sources built locally on the brand side. All paths
+# under ./workdir/ are populated by install.sh before `docker compose up`.
+#
+# Usage:
+#   docker compose --env-file workdir/.env build
+#   docker compose --env-file workdir/.env up -d
+#
+# Or install.sh handles the orchestration end-to-end.
+#
+# Conventions:
+#   - Platform components (backend, ocpp): image: from GHCR, pinned in
+#     platform.lock.json → PLATFORM_VERSION in workdir/.env.
+#   - Database image (csms-db): built locally from workdir/db at first
+#     install; tagged local/csms-db:${PLATFORM_VERSION}. db-init and
+#     db-migrate share the image but differ by entrypoint.
+#   - Frontend apps: built locally from workdir/frontend/<app>.
+#   - Infra (nginx, pgbouncer, pgweb): bundled .docker/ Dockerfiles.
+#     Brand-specific chunks live under .docker/ too — operator may
+#     customize without touching this compose.
+
+name: '${PROJECT_NAME:-csms}'
+
+# ─── Infrastructure ───────────────────────────────────────────
+
+services:
+
+  nginx:
+    build: ./.docker/nginx-certbot
+    container_name: nginx
+    hostname: ${DOMAIN:-localhost}
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    networks:
+      wan-network:
+      lan-network:
+        aliases:
+          - dev.${DOMAIN:-localhost}
+          - cloud.${DOMAIN:-localhost}
+          - cpo.${DOMAIN:-localhost}
+          - cs.${DOMAIN:-localhost}
+          - driver.${DOMAIN:-localhost}
+          - admin.${DOMAIN:-localhost}
+          - landing.${DOMAIN:-localhost}
+          - ocpp.${DOMAIN:-localhost}
+          - auth.${DOMAIN:-localhost}
+          - pay.${DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - backend
+      - ocpp
+      - landing
+      - frontend
+      - driver
+      - pay
+    restart: unless-stopped
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+
+  wireguard:
+    build: ./.docker/wireguard
+    container_name: wireguard
+    profiles: ["vpn"]
+    environment:
+      - PUID=1000
+      - PGID=1000
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv4.conf.all.src_valid_mark=1
+      - net.ipv4.conf.all.proxy_arp=1
+    ports:
+      - "51828:51828/udp"
+    networks:
+      - wan-network
+      - lan-network
+      - db-network
+    volumes:
+      - /lib/modules:/lib/modules:ro
+    restart: unless-stopped
+
+  # ─── Database ─────────────────────────────────────────────
+
+  postgres:
+    image: postgres:18
+    container_name: postgres
+    cap_add:
+      - NET_ADMIN
+    networks:
+      - db-network
+    ports:
+      - "5431:5432"
+    restart: unless-stopped
+    env_file:
+      - ./workdir/.env
+    environment:
+      POSTGRES_DB: ${PGDATABASE:-csms}
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      BUILD_ENV: ${BUILD_ENV:-dev}
+    volumes:
+      - postgresql:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD', 'pg_isready', '-U', 'postgres']
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  pgbouncer:
+    build: ./.docker/pgbouncer
+    container_name: pgbouncer
+    networks:
+      - db-network
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - ./workdir/.env
+    environment:
+      DB_NAME: ${PGDATABASE:-csms}
+    healthcheck:
+      test: ['CMD', 'pg_isready', '-h', 'pgbouncer', '-p', '6432']
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  pgweb:
+    build: ./.docker/pgweb
+    container_name: pgweb
+    restart: unless-stopped
+    networks:
+      - lan-network
+      - db-network
+    environment:
+      PGWEB_DATABASE_URL: "postgres://admin:${DB_PASS_ADMIN}@postgres:5432/${PGDATABASE:-csms}?sslmode=disable"
+      PGWEB_URL_PREFIX: pgweb
+      PGWEB_AUTH_USER: admin
+      PGWEB_AUTH_PASS: ${DB_PASS_ADMIN}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ─── DB init + migrate (same image, different entrypoints) ──
+
+  db-init:
+    build:
+      context: ./workdir/db
+      args:
+        PLATFORM_VERSION: ${PLATFORM_VERSION:-dev}
+    image: local/csms-db:${PLATFORM_VERSION:-dev}
+    container_name: db-init
+    entrypoint: ["/opt/csms-db/docker/init.sh"]
+    networks:
+      - db-network
+    env_file:
+      - ./workdir/.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  db-migrate:
+    image: local/csms-db:${PLATFORM_VERSION:-dev}
+    container_name: db-migrate
+    entrypoint: ["/opt/csms-db/docker/migrate.sh"]
+    networks:
+      - db-network
+    env_file:
+      - ./workdir/.env
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    restart: "no"
+
+  # ─── Platform services (pulled from GHCR) ───────────────────
+
+  backend:
+    image: ghcr.io/apostol-csms/csms-backend:${PLATFORM_VERSION:-latest}
+    container_name: backend
+    networks:
+      - lan-network
+      - db-network
+    restart: unless-stopped
+    env_file:
+      - ./workdir/.env
+    environment:
+      # Legacy libpq/app name compatibility (brand SSOT uses new naming).
+      PGPASSWORD: ${DB_PASS_DAEMON}
+      PGPASSWORDAPI: ${DB_PASS_APIBOT}
+      CLIENT_SECRET_SERVICE: ${OAUTH2_SECRET_SERVICE}
+      CLIENT_SECRET_WEB: ${OAUTH2_SECRET_WEB}
+      CLIENT_SECRET_ANDROID: ${OAUTH2_SECRET_ANDROID}
+      CLIENT_SECRET_IOS: ${OAUTH2_SECRET_IOS}
+      WORKER_PROCESSES: ${WORKER_PROCESSES:-8}
+      PGSSLCERT: /tmp/postgresql.crt
+      PGHOST: pgbouncer
+      PGPORT: 6432
+      PGUSER: daemon
+      PGHOSTAPI: postgres
+      PGPORTAPI: 5432
+      PGUSERAPI: apibot
+    volumes:
+      - tmp:/tmp/csms
+      - files:/etc/csms/files
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+      pgbouncer:
+        condition: service_started
+
+  ocpp:
+    image: ghcr.io/apostol-csms/csms-ocpp:${PLATFORM_VERSION:-latest}
+    container_name: ocpp
+    networks:
+      - lan-network
+      - db-network
+    ports:
+      - "9220:9220"
+    restart: unless-stopped
+    env_file:
+      - ./workdir/.env
+    environment:
+      PGPASSWORD: ${DB_PASS_OCPP}
+      PGPASSWORDAPI: ${DB_PASS_APIBOT}
+      CLIENT_SECRET_SERVICE: ${OAUTH2_SECRET_SERVICE}
+      CLIENT_SECRET_WEB: ${OAUTH2_SECRET_WEB}
+      CLIENT_SECRET_ANDROID: ${OAUTH2_SECRET_ANDROID}
+      CLIENT_SECRET_IOS: ${OAUTH2_SECRET_IOS}
+      CLIENT_SECRET_OCPP: ${OAUTH2_SECRET_OCPP}
+      PGSSLCERT: /tmp/postgresql.crt
+      PGHOST: pgbouncer
+      PGPORT: 6432
+      PGUSER: ocpp
+      PGHOSTAPI: postgres
+      PGPORTAPI: 5432
+      PGUSERAPI: apibot
+      API_HOST: cloud.${DOMAIN:-localhost}
+      OCPP_HOST: cs.${DOMAIN:-localhost}
+    depends_on:
+      - backend
+
+  # ─── Frontend apps (built locally from cloned sources) ──────
+
+  landing:
+    build:
+      context: ./workdir/frontend/landing
+      dockerfile: .docker/Dockerfile
+    container_name: landing
+    networks:
+      - lan-network
+    env_file:
+      - ./workdir/frontend/landing/src/.env
+
+  frontend:
+    build:
+      context: ./workdir/frontend/webapp
+      dockerfile: Dockerfile
+      args:
+        # Next.js inlines NEXT_PUBLIC_* into the JS bundle at build time.
+        # Values come from the brand's workdir/.env (populated by install.sh
+        # from envs/<env>/.env.template + secrets provider).
+        NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+        NEXT_PUBLIC_OAUTH_CLIENT_ID: ${OAUTH_CLIENT_ID}
+        NEXT_PUBLIC_OAUTH_SCOPE: ${OAUTH_SCOPE}
+        NEXT_PUBLIC_MAP_PROVIDER: ${MAP_PROVIDER:-stadia}
+        NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY}
+        NEXT_PUBLIC_YANDEX_MAPS_API_KEY: ${YANDEX_MAPS_API_KEY}
+        NEXT_PUBLIC_STADIA_API_KEY: ${STADIA_API_KEY}
+        NEXT_PUBLIC_MAP_DEFAULT_CENTER: ${MAP_DEFAULT_CENTER:-4.35,50.85}
+        NEXT_PUBLIC_PROJECT_NAME: ${NEXT_PUBLIC_PROJECT_NAME:-Apostol CSMS}
+    container_name: frontend
+    networks:
+      - lan-network
+
+  driver:
+    build:
+      context: ./workdir/frontend
+      dockerfile: driver/.docker/Dockerfile
+    container_name: driver
+    env_file:
+      - ./workdir/frontend/driver/.env
+    networks:
+      - lan-network
+    restart: unless-stopped
+
+  pay:
+    build:
+      context: ./workdir/frontend/pay
+      dockerfile: .docker/Dockerfile
+    container_name: pay
+    env_file:
+      - ./workdir/frontend/pay/.env
+    networks:
+      - lan-network
+
+  # auth:
+  #   TODO: rework when new frontend repo structure stabilizes.
+  #   In the monorepo it built from root with .docker/auth/Dockerfile.
+  #   Split boundary: auth source → apostol-csms/frontend/auth/.
+
+  # ─── Optional ───────────────────────────────────────────────
+
+  stripe-cli:
+    image: stripe/stripe-cli:latest
+    container_name: stripe-cli
+    networks:
+      - lan-network
+    command: ["listen", "--api-key", "${STRIPE_API_KEY}", "--device-name", "${PROJECT_NAME:-csms}-${BUILD_ENV:-dev}", "--skip-update", "--forward-to", "http://backend:4977/stripe/webhook"]
+    depends_on:
+      - backend
+    restart: unless-stopped
+    profiles:
+      - stripe
+
+networks:
+  wan-network:
+  lan-network:
+  db-network:
+
+volumes:
+  letsencrypt:
+  postgresql:
+  files:
+  tmp:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=100m
