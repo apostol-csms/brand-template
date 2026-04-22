@@ -130,7 +130,10 @@ services:
     environment:
       DB_NAME: ${PGDATABASE:-csms}
     healthcheck:
-      test: ['CMD', 'pg_isready', '-h', 'pgbouncer', '-p', '6432']
+      # Explicit -U to avoid "no such user: postgres" log spam —
+      # pg_isready defaults to the `postgres` OS user which isn't in
+      # pgbouncer's userlist. kernel is always present.
+      test: ['CMD', 'pg_isready', '-h', 'pgbouncer', '-p', '6432', '-U', 'kernel']
       interval: 10s
       timeout: 5s
       retries: 3
