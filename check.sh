@@ -124,7 +124,11 @@ check_postgres() {
 }
 
 check_api_ping() {
-  local URL="https://${DOMAIN}/api/v1/ping"
+  # Bare DOMAIN serves the landing SPA; the API lives on the cloud/cpo/
+  # cs/admin subdomains. cloud is the canonical one for health probes.
+  local HOST="cloud.${DOMAIN}"
+  [[ "$DOMAIN" == "localhost" ]] && HOST="$DOMAIN"
+  local URL="https://${HOST}/api/v1/ping"
   local CODE
   CODE="$(curl -ks -o /dev/null -w '%{http_code}' --max-time 5 "$URL" 2>/dev/null)"
   if [[ "$CODE" == "200" ]]; then
