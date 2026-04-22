@@ -181,6 +181,8 @@ load_platform_lock() {
   PLATFORM_VERSION="$(jq -r '.platform_version' "$LOCK")"
   DB_REF="$(jq -r '.sources["apostol-csms/db"].ref' "$LOCK")"
   FRONTEND_REF="$(jq -r '.sources["apostol-csms/frontend"].ref' "$LOCK")"
+  AUTH_REF="$(jq -r '.sources["apostol-csms/auth"].ref // empty' "$LOCK")"
+  [[ -z "$AUTH_REF" ]] && AUTH_REF="v${PLATFORM_VERSION}"
   if [[ -z "$PLATFORM_VERSION" || "$PLATFORM_VERSION" == "null" ]]; then
     err "platform.lock.json missing 'platform_version'"; exit 1
   fi
@@ -191,7 +193,7 @@ load_platform_lock() {
     err "platform.lock.json missing 'sources.apostol-csms/frontend.ref'"; exit 1
   fi
   export PLATFORM_VERSION
-  log "pin: platform=$PLATFORM_VERSION db=$DB_REF frontend=$FRONTEND_REF"
+  log "pin: platform=$PLATFORM_VERSION db=$DB_REF frontend=$FRONTEND_REF auth=$AUTH_REF"
 }
 
 # ─── Step 5: Merge env templates → workdir/.env ──────────────────────
@@ -242,9 +244,14 @@ clone_sources() {
     exit 1
   fi
 
-  for REPO in db frontend; do
+  for REPO in db frontend auth; do
     local TARGET="$WORKDIR/$REPO"
-    local REF; if [[ "$REPO" == "db" ]]; then REF="$DB_REF"; else REF="$FRONTEND_REF"; fi
+    local REF
+    case "$REPO" in
+      db)       REF="$DB_REF" ;;
+      frontend) REF="$FRONTEND_REF" ;;
+      auth)     REF="$AUTH_REF" ;;
+    esac
     local URL="https://${GIT_TOKEN:-TOKEN}@github.com/apostol-csms/${REPO}.git"
     if [[ -d "$TARGET/.git" ]]; then
       log "  $REPO: exists — fetch + checkout $REF"

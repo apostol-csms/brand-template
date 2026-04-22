@@ -150,6 +150,8 @@ resolve_target() {
     PLATFORM_VERSION="$(jq -r '.platform_version' "$LOCK")"
     DB_REF="$(jq -r '.sources["apostol-csms/db"].ref' "$LOCK")"
     FRONTEND_REF="$(jq -r '.sources["apostol-csms/frontend"].ref' "$LOCK")"
+    AUTH_REF="$(jq -r '.sources["apostol-csms/auth"].ref // empty' "$LOCK")"
+    [[ -z "$AUTH_REF" ]] && AUTH_REF="v${PLATFORM_VERSION}"
   fi
 
   for V in PLATFORM_VERSION DB_REF FRONTEND_REF; do
@@ -211,8 +213,13 @@ update_sources() {
   # GIT_TOKEN needed for fetch on private repos.
   # shellcheck disable=SC1091
   [[ $DRY_RUN -eq 0 ]] && source "$WORKDIR/.env"
-  for REPO in db frontend; do
-    local REF; if [[ "$REPO" == "db" ]]; then REF="$DB_REF"; else REF="$FRONTEND_REF"; fi
+  for REPO in db frontend auth; do
+    local REF
+    case "$REPO" in
+      db)       REF="$DB_REF" ;;
+      frontend) REF="$FRONTEND_REF" ;;
+      auth)     REF="$AUTH_REF" ;;
+    esac
     local TARGET="$WORKDIR/$REPO"
     if [[ ! -d "$TARGET/.git" ]]; then
       err "$TARGET is not a git checkout. Did install.sh run?"; exit 1
@@ -229,9 +236,9 @@ update_sources() {
 rebuild_local() {
   local SERVICES
   if [[ $FRONTEND_ONLY -eq 1 ]]; then
-    SERVICES="landing frontend driver pay"
+    SERVICES="landing frontend driver pay auth"
   else
-    SERVICES="db-init db-migrate landing frontend driver pay nginx pgbouncer pgweb"
+    SERVICES="db-init db-migrate landing frontend driver pay auth nginx pgbouncer pgweb"
   fi
   log "docker compose build: $SERVICES"
   # shellcheck disable=SC2086
@@ -258,9 +265,9 @@ run_db_migrate() {
 rolling_restart() {
   local SERVICES
   if [[ $FRONTEND_ONLY -eq 1 ]]; then
-    SERVICES="landing frontend driver pay"
+    SERVICES="landing frontend driver pay auth"
   else
-    SERVICES="backend ocpp landing frontend driver pay pgbouncer pgweb nginx"
+    SERVICES="backend ocpp landing frontend driver pay auth pgbouncer pgweb nginx"
   fi
   log "rolling restart: $SERVICES"
   # shellcheck disable=SC2086

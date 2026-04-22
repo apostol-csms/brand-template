@@ -57,6 +57,7 @@ services:
       - frontend
       - driver
       - pay
+      - auth
     restart: unless-stopped
     volumes:
       - letsencrypt:/etc/letsencrypt
@@ -303,10 +304,24 @@ services:
     networks:
       - lan-network
 
-  # auth:
-  #   TODO: rework when new frontend repo structure stabilizes.
-  #   In the monorepo it built from root with .docker/auth/Dockerfile.
-  #   Split boundary: auth source → apostol-csms/frontend/auth/.
+  auth:
+    # OAuth2 SPA — Vue 3 + Vite. Built locally from apostol-csms/auth
+    # clone (install.sh clone_sources step) with brand-specific VITE_*
+    # args baked into the bundle at build time.
+    build:
+      context: ./workdir/auth
+      args:
+        VITE_API_HOST: https://cloud.${DOMAIN:-localhost}
+        VITE_CLIENT_ID: ${OAUTH_CLIENT_ID}
+        VITE_SCOPE: ${OAUTH_SCOPE}
+        VITE_APP_TITLE: ${PROJECT_DISPLAY_NAME:-Apostol CSMS}
+        VITE_APP_LOGO: ${BRANDING_LOGO_URL:-/assets/logo.svg}
+        VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+        VITE_DEFAULT_LOCALE: ${PROJECT_LOCALE:-en}
+    container_name: auth
+    networks:
+      - lan-network
+    restart: unless-stopped
 
   # ─── Optional ───────────────────────────────────────────────
 
