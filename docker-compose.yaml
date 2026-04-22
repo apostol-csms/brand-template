@@ -105,7 +105,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       BUILD_ENV: ${BUILD_ENV:-dev}
     volumes:
-      - postgresql:/var/lib/postgresql/data
+      # postgres:18+ requires the volume at /var/lib/postgresql (not /data)
+      # so that pg_ctlcluster's major-version subdirectories sit inside
+      # the mount. See docker-library/postgres#1259.
+      - postgresql:/var/lib/postgresql
     healthcheck:
       test: ['CMD', 'pg_isready', '-U', 'postgres']
       interval: 10s
