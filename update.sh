@@ -221,13 +221,17 @@ update_sources() {
       auth)     REF="$AUTH_REF" ;;
     esac
     local TARGET="$WORKDIR/$REPO"
-    if [[ ! -d "$TARGET/.git" ]]; then
-      err "$TARGET is not a git checkout. Did install.sh run?"; exit 1
+    local URL="https://${GIT_TOKEN:-TOKEN}@github.com/apostol-csms/${REPO}.git"
+    if [[ -d "$TARGET/.git" ]]; then
+      log "  $REPO: fetch + checkout $REF"
+      run git -C "$TARGET" fetch origin --tags
+      run git -C "$TARGET" checkout "$REF"
+      run git -C "$TARGET" submodule update --init --recursive
+    else
+      # New platform component added after the initial install — clone.
+      log "  $REPO: not present — cloning at $REF"
+      run git clone --recurse-submodules --branch "$REF" "$URL" "$TARGET"
     fi
-    log "  $REPO: fetch + checkout $REF"
-    run git -C "$TARGET" fetch origin --tags
-    run git -C "$TARGET" checkout "$REF"
-    run git -C "$TARGET" submodule update --init --recursive
   done
 }
 
