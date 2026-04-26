@@ -265,17 +265,64 @@ run_db_migrate() {
 }
 
 # ─── Step 9: Rolling restart ─────────────────────────────────────────
+#
+# TWO-PHASE. nginx must NOT be recreated in the same compose batch as
+# its upstreams — docker embedded DNS can reassign freed IPs across
+# siblings, and an nginx that came up too early will cache a resolve
+# that now points at the wrong container (bare ${DOMAIN} serving the
+# auth SPA is the canonical symptom). Sequence:
+#
+#   Phase 1: --force-recreate upstreams (backend, ocpp, SPAs, pg*).
+#            Wait until every SPA reports healthy (from its
+#            `x-spa-healthcheck` in docker-compose.yaml).
+#   Phase 2: --force-recreate nginx. Its resolver cache starts fresh
+#            and DNS is already settled.
+#
+# If any SPA fails to become healthy within WAIT_HEALTHY_MAX_S, we
+# exit 2 WITHOUT recreating nginx. The old nginx keeps serving from
+# the previous (still-running) upstreams, so the stack never enters
+# a half-broken state. Operator investigates, reruns update.sh.
+
+SPA_SERVICES="landing frontend driver pay auth"
+WAIT_HEALTHY_MAX_S=120
+
+wait_spas_healthy() {
+  [[ $DRY_RUN -eq 1 ]] && { log "[dry-run] skip wait_spas_healthy"; return 0; }
+  log "  wait SPAs healthy (max ${WAIT_HEALTHY_MAX_S}s)…"
+  local t=0 pending
+  while (( t < WAIT_HEALTHY_MAX_S )); do
+    pending=""
+    for svc in $SPA_SERVICES; do
+      local status
+      status="$(compose_cmd ps --format json "$svc" 2>/dev/null \
+                | jq -rs '.[0].Health // "unknown"' 2>/dev/null || echo unknown)"
+      [[ "$status" == "healthy" ]] || pending="$pending $svc=$status"
+    done
+    if [[ -z "$pending" ]]; then
+      log "  all SPAs healthy after ${t}s"
+      return 0
+    fi
+    sleep 3; t=$((t+3))
+  done
+  err "SPAs did not reach healthy within ${WAIT_HEALTHY_MAX_S}s:$pending"
+  err "  nginx phase SKIPPED — old nginx keeps routing. Investigate:"
+  err "  docker compose --env-file workdir/.env logs $SPA_SERVICES --tail=80"
+  exit 2
+}
 
 rolling_restart() {
-  local SERVICES
+  local UPSTREAM
   if [[ $FRONTEND_ONLY -eq 1 ]]; then
-    SERVICES="landing frontend driver pay auth"
+    UPSTREAM="$SPA_SERVICES"
   else
-    SERVICES="backend ocpp landing frontend driver pay auth pgbouncer pgweb nginx"
+    UPSTREAM="backend ocpp $SPA_SERVICES pgbouncer pgweb"
   fi
-  log "rolling restart: $SERVICES"
+  log "rolling restart (phase 1 — upstreams): $UPSTREAM"
   # shellcheck disable=SC2086
-  run compose_cmd up -d --no-deps --force-recreate $SERVICES
+  run compose_cmd up -d --no-deps --force-recreate $UPSTREAM
+  wait_spas_healthy
+  log "rolling restart (phase 2 — nginx)"
+  run compose_cmd up -d --no-deps --force-recreate nginx
 }
 
 # ─── Step 10: Hooks ──────────────────────────────────────────────────

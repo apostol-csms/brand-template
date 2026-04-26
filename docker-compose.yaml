@@ -23,6 +23,35 @@
 
 name: '${PROJECT_NAME:-csms}'
 
+# ─── SPA healthcheck (shared via YAML anchor) ─────────────────
+#
+# All five SPA apps (landing/frontend/driver/pay/auth) listen :3000
+# inside the container. Without a healthcheck Docker reports the
+# container "started" the moment the first process forks — before
+# Next.js / Nuxt finish bootstrapping — and nginx (which waits on
+# service_healthy) may route to a container that isn't listening
+# yet, or worse to an IP just reassigned from a sibling. That's
+# the root cause of bare ${DOMAIN} serving auth SPA after
+# update.sh's rolling-recreate. Paired with update.sh's two-phase
+# rolling_restart this keeps deploys race-free.
+#
+# Probe: TCP-listen check via busybox `netstat`. Not an HTTP probe
+# on purpose:
+#   - Next.js standalone's `node server.js` binds to $HOSTNAME (the
+#     container name → the docker-bridge IP), NOT 127.0.0.1 or
+#     0.0.0.0, so `wget http://127.0.0.1:3000/` fails.
+#   - Next.js `/` does a locale redirect whose Location is not
+#     resolvable by busybox wget's --spider.
+# TCP-listen catches the real race we care about (process forked
+# but not yet accepting connections). Semantic HTTP checks live in
+# check.sh, probing from outside via public URLs.
+x-spa-healthcheck: &spa-healthcheck
+  test: ["CMD-SHELL", "netstat -tln 2>/dev/null | grep -q ':3000 ' || exit 1"]
+  interval: 5s
+  timeout: 3s
+  retries: 24
+  start_period: 20s
+
 # ─── Infrastructure ───────────────────────────────────────────
 
 services:
@@ -50,14 +79,18 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    # Wait for each SPA to pass its HTTP healthcheck before nginx is
+    # allowed to route traffic. Prevents bare-domain ↔ auth confusion
+    # after rolling restart (see x-spa-healthcheck comment above).
+    # backend/ocpp don't ship healthchecks yet → service_started.
     depends_on:
-      - backend
-      - ocpp
-      - landing
-      - frontend
-      - driver
-      - pay
-      - auth
+      backend:  { condition: service_started }
+      ocpp:     { condition: service_started }
+      landing:  { condition: service_healthy }
+      frontend: { condition: service_healthy }
+      driver:   { condition: service_healthy }
+      pay:      { condition: service_healthy }
+      auth:     { condition: service_healthy }
     restart: unless-stopped
     volumes:
       - letsencrypt:/etc/letsencrypt
@@ -98,6 +131,23 @@ services:
     ports:
       - "5431:5432"
     restart: unless-stopped
+    # Minimal sane default: max_connections=200.
+    # Why 200: with WORKER_PROCESSES=8 the backend pool sits at
+    # ~64 apibot + ~31 daemon slots permanently, leaving no room
+    # for kernel (db-migrate during `update.sh`) or one-off admin
+    # queries. 200 leaves headroom; at ~10 MB per idle slot this
+    # is well within reach on a 4+ GB host. Revisit if
+    # WORKER_PROCESSES is tuned above 16.
+    #
+    # For anything beyond max_connections (shared_buffers,
+    # effective_cache_size, work_mem, …) drop a tuned
+    # postgresql.conf into .docker/postgres/postgresql.conf and
+    # replace this command + add the mount:
+    #   command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    #   volumes:
+    #     - ./.docker/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    # See https://pgtune.leopard.in.ua for a starting point.
+    command: ["postgres", "-c", "max_connections=200"]
     env_file:
       - ./workdir/.env
     environment:
@@ -181,6 +231,15 @@ services:
       - db-network
     env_file:
       - ./workdir/.env
+    environment:
+      # migrate.sh reads PGPASSWORD (or KERNEL_PASSWORD) for the `kernel`
+      # role. env_file gives us DB_PASS_KERNEL but that name is not in
+      # migrate.sh's fallback chain — without this explicit mapping the
+      # guard `SELECT 1 FROM pg_database` fails with "no password
+      # supplied" and the script misleadingly logs `database
+      # '<PGDATABASE>' does not exist — db-init should run first`.
+      # Mirrors the pattern backend/ocpp already use for DB_PASS_DAEMON.
+      PGPASSWORD: ${DB_PASS_KERNEL}
     depends_on:
       db-init:
         condition: service_completed_successfully
@@ -264,6 +323,7 @@ services:
       - lan-network
     env_file:
       - ./workdir/frontend/landing/src/.env
+    healthcheck: *spa-healthcheck
 
   frontend:
     build:
@@ -285,6 +345,7 @@ services:
     container_name: frontend
     networks:
       - lan-network
+    healthcheck: *spa-healthcheck
 
   driver:
     build:
@@ -296,6 +357,7 @@ services:
     networks:
       - lan-network
     restart: unless-stopped
+    healthcheck: *spa-healthcheck
 
   pay:
     build:
@@ -306,6 +368,7 @@ services:
       - ./workdir/frontend/pay/.env
     networks:
       - lan-network
+    healthcheck: *spa-healthcheck
 
   auth:
     # OAuth2 SPA — Vue 3 + Vite. Built locally from apostol-csms/auth
@@ -325,6 +388,7 @@ services:
     networks:
       - lan-network
     restart: unless-stopped
+    healthcheck: *spa-healthcheck
 
   # ─── Optional ───────────────────────────────────────────────
 
