@@ -280,51 +280,41 @@ load_secrets() {
   chmod 600 "$WORKDIR/.env"
 }
 
-# ─── Step 7: Clone private sources ───────────────────────────────────
+# ─── Step 7: Clone private sources (landing only) ────────────────────
+#
+# Phase 10 — db, frontend, auth are now pulled as public GHCR images.
+# Only the brand-specific landing site is still built from source (per
+# <brand>/landing repo).  If the brand has no landing repo, the operator
+# comments out the landing service in docker-compose.yaml and this step
+# becomes a no-op.
 
 clone_sources() {
-  log "clone platform sources at $PLATFORM_VERSION"
-  # GIT_TOKEN comes from workdir/.env (populated by secrets).
+  log "clone brand-specific sources at $PLATFORM_VERSION"
   # shellcheck disable=SC1091
   [[ $DRY_RUN -eq 0 ]] && source "$WORKDIR/.env"
-  if [[ -z "${GIT_TOKEN:-}" && $DRY_RUN -eq 0 ]]; then
-    err "GIT_TOKEN not set in workdir/.env — secrets provider must supply it (read:repo for apostol-csms/{db,frontend})"
-    exit 1
-  fi
 
-  for REPO in db frontend auth; do
-    local TARGET="$WORKDIR/$REPO"
-    local REF
-    case "$REPO" in
-      db)       REF="$DB_REF" ;;
-      frontend) REF="$FRONTEND_REF" ;;
-      auth)     REF="$AUTH_REF" ;;
-    esac
-    local URL="https://${GIT_TOKEN:-TOKEN}@github.com/apostol-csms/${REPO}.git"
-    if [[ -d "$TARGET/.git" ]]; then
-      log "  $REPO: exists — fetch + checkout $REF"
-      run git -C "$TARGET" fetch origin --tags
-      run git -C "$TARGET" checkout "$REF"
-      run git -C "$TARGET" submodule update --init --recursive
-    else
-      log "  $REPO: clone $REF"
-      run git clone --recurse-submodules --branch "$REF" "$URL" "$TARGET"
-    fi
-  done
+  # Landing is per-brand: <brand>/landing — sibling clone, not under
+  # workdir/.  install.sh assumes it already exists if the operator has
+  # uncommented the landing service.  No-op here.
+  log "  (no platform repos to clone in pure-image mode)"
 }
 
 # ─── Step 8: Pull images ─────────────────────────────────────────────
 
 pull_images() {
-  log "pull platform images from ghcr.io/apostol-csms/*"
-  run docker pull "ghcr.io/apostol-csms/csms-backend:$PLATFORM_VERSION"
-  run docker pull "ghcr.io/apostol-csms/csms-ocpp:$PLATFORM_VERSION"
+  log "pull all platform images from ghcr.io/apostol-csms/* (Phase 10)"
+  # `compose pull` reads images from compose itself — picks up
+  # PLATFORM_VERSION from workdir/.env automatically.  Brand-specific
+  # `landing` (build: context) is skipped by --ignore-buildable.
+  run docker compose --env-file "$WORKDIR/.env" pull --ignore-buildable
 }
 
-# ─── Step 9: Build locally ───────────────────────────────────────────
+# ─── Step 9: Build infra + landing ───────────────────────────────────
 
 build_local() {
-  log "docker compose build"
+  log "docker compose build (infra + landing only)"
+  # Only buildable services remain: nginx, pgbouncer, pgweb, wireguard,
+  # and the brand-specific landing.  Platform images are already pulled.
   run docker compose --env-file "$WORKDIR/.env" build
 }
 

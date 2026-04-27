@@ -201,48 +201,32 @@ reload_secrets() {
 # ─── Step 5: Pull platform images ────────────────────────────────────
 
 pull_images() {
-  log "pull ghcr.io/apostol-csms/csms-backend:$PLATFORM_VERSION"
-  run docker pull "ghcr.io/apostol-csms/csms-backend:$PLATFORM_VERSION"
-  log "pull ghcr.io/apostol-csms/csms-ocpp:$PLATFORM_VERSION"
-  run docker pull "ghcr.io/apostol-csms/csms-ocpp:$PLATFORM_VERSION"
+  log "pull all platform images for $PLATFORM_VERSION (Phase 10)"
+  # `compose pull` reads images from compose itself — picks up
+  # PLATFORM_VERSION from workdir/.env automatically and skips the
+  # remaining build: contexts (landing + infra).
+  run compose_cmd pull --ignore-buildable
 }
 
-# ─── Step 6: Update cloned sources ───────────────────────────────────
+# ─── Step 6: Update brand-specific sources (landing only) ────────────
+#
+# Phase 10 — db, frontend, auth are all GHCR images.  Only landing is
+# still source-built per <brand>/landing repo.
 
 update_sources() {
-  # GIT_TOKEN needed for fetch on private repos.
-  # shellcheck disable=SC1091
-  [[ $DRY_RUN -eq 0 ]] && source "$WORKDIR/.env"
-  for REPO in db frontend auth; do
-    local REF
-    case "$REPO" in
-      db)       REF="$DB_REF" ;;
-      frontend) REF="$FRONTEND_REF" ;;
-      auth)     REF="$AUTH_REF" ;;
-    esac
-    local TARGET="$WORKDIR/$REPO"
-    local URL="https://${GIT_TOKEN:-TOKEN}@github.com/apostol-csms/${REPO}.git"
-    if [[ -d "$TARGET/.git" ]]; then
-      log "  $REPO: fetch + checkout $REF"
-      run git -C "$TARGET" fetch origin --tags
-      run git -C "$TARGET" checkout "$REF"
-      run git -C "$TARGET" submodule update --init --recursive
-    else
-      # New platform component added after the initial install — clone.
-      log "  $REPO: not present — cloning at $REF"
-      run git clone --recurse-submodules --branch "$REF" "$URL" "$TARGET"
-    fi
-  done
+  log "  (no platform repos to update in pure-image mode)"
 }
 
-# ─── Step 7: Build (locally-built images) ────────────────────────────
+# ─── Step 7: Build infra + landing ───────────────────────────────────
 
 rebuild_local() {
   local SERVICES
   if [[ $FRONTEND_ONLY -eq 1 ]]; then
-    SERVICES="landing frontend driver pay auth"
+    # Pure-image SPAs — recreate-only via restart_services; nothing to
+    # build.  Landing is the sole brand-built frontend.
+    SERVICES="landing"
   else
-    SERVICES="db-init db-migrate landing frontend driver pay auth nginx pgbouncer pgweb"
+    SERVICES="landing nginx pgbouncer pgweb"
   fi
   log "docker compose build: $SERVICES"
   # shellcheck disable=SC2086

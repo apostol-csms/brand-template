@@ -1,22 +1,26 @@
-# Apostol CSMS — brand deployment compose.
+# Apostol CSMS — brand deployment compose (Phase 10 zero-build).
 #
-# Image-based deployment: platform binaries pulled from GHCR, database
-# layer + frontend sources built locally on the brand side. All paths
-# under ./workdir/ are populated by install.sh before `docker compose up`.
+# Pure-image deployment: every platform component is pulled from GHCR
+# and pinned by digest in envs/<env>/platform.lock.json → PLATFORM_VERSION
+# in workdir/.env.  The brand side never builds platform code; only
+# infra (nginx/pgbouncer/pgweb) and the brand-specific landing site are
+# built locally.
 #
 # Usage:
-#   docker compose --env-file workdir/.env build
+#   docker compose --env-file workdir/.env pull
 #   docker compose --env-file workdir/.env up -d
 #
-# Or install.sh handles the orchestration end-to-end.
+# Or install.sh / update.sh handle the orchestration end-to-end.
 #
 # Conventions:
-#   - Platform components (backend, ocpp): image: from GHCR, pinned in
-#     platform.lock.json → PLATFORM_VERSION in workdir/.env.
-#   - Database image (csms-db): built locally from workdir/db at first
-#     install; tagged local/csms-db:${PLATFORM_VERSION}. db-init and
-#     db-migrate share the image but differ by entrypoint.
-#   - Frontend apps: built locally from workdir/frontend/<app>.
+#   - Platform: backend, ocpp, db-init/db-migrate, frontend, driver, pay,
+#     auth → image: ghcr.io/apostol-csms/csms-*:${PLATFORM_VERSION}.
+#   - csms-db image ships encrypted SQL (Phase 4c) — runtime decryption
+#     via license envelope's db_key_wrapped, no source code on the brand
+#     side.
+#   - SPA images are brand-agnostic — runtime brand identity comes from
+#     the license attestation chain (Phase 6/7/8/9).
+#   - Landing is brand-specific (per <brand>/landing repo) — `build:`.
 #   - Infra (nginx, pgbouncer, pgweb): bundled .docker/ Dockerfiles.
 #     Brand-specific chunks live under .docker/ too — operator may
 #     customize without touching this compose.
@@ -213,26 +217,38 @@ services:
         condition: service_healthy
 
   # ─── DB init + migrate (same image, different entrypoints) ──
+  #
+  # Phase 10 — csms-db ships as a public GHCR image with the encrypted
+  # SQL configuration baked in (CI build-arg CSMS_DB_KEY → AES-CTR
+  # tarball).  Brand side never sees the SQL sources; init.sh decrypts
+  # at runtime via license envelope's db_key_wrapped (Phase 4c).
 
   db-init:
-    build:
-      context: ./workdir/db
-      args:
-        PLATFORM_VERSION: ${PLATFORM_VERSION:-dev}
-    image: local/csms-db:${PLATFORM_VERSION:-dev}
+    image: ghcr.io/apostol-csms/csms-db:${PLATFORM_VERSION:-latest}
     container_name: db-init
     entrypoint: ["/opt/csms-db/docker/init.sh"]
     networks:
       - db-network
     env_file:
       - ./workdir/.env
+    volumes:
+      # csms-secrets persistent volume — entrypoint-secrets.sh writes
+      # passwords.psql / oauth2.psql / install.pgpass / db.pgpass here
+      # on first install (idempotent across restarts).  In image-mode
+      # compose-env.sh composes $SQL_DIR/.env/.env.psql by \ir-ing those
+      # files alongside project.* GUCs derived from license.json.
+      - csms-secrets:/var/lib/csms/secrets
+      # License envelope — Phase 4c db_key_wrapped → CSMS_DB_KEY via
+      # extract-db-key.sh; Phase 2d payload.brand → project.* GUCs via
+      # compose-env.sh.  pre-install hook copies it from .secrets/.
+      - ./conf/license.json:/etc/csms/conf/license.json:ro
     depends_on:
       postgres:
         condition: service_healthy
     restart: "no"
 
   db-migrate:
-    image: local/csms-db:${PLATFORM_VERSION:-dev}
+    image: ghcr.io/apostol-csms/csms-db:${PLATFORM_VERSION:-latest}
     container_name: db-migrate
     entrypoint: ["/opt/csms-db/docker/migrate.sh"]
     networks:
@@ -248,6 +264,10 @@ services:
       # '<PGDATABASE>' does not exist — db-init should run first`.
       # Mirrors the pattern backend/ocpp already use for DB_PASS_DAEMON.
       PGPASSWORD: ${DB_PASS_KERNEL}
+    volumes:
+      # Same csms-secrets + license.json as db-init.
+      - csms-secrets:/var/lib/csms/secrets
+      - ./conf/license.json:/etc/csms/conf/license.json:ro
     depends_on:
       db-init:
         condition: service_completed_successfully
@@ -283,6 +303,9 @@ services:
     volumes:
       - tmp:/tmp/csms
       - files:/etc/csms/files
+      # License envelope — read by both process-LicenseServer (Phase 3a)
+      # and module-LicenseServer (Phase 3b) at boot + on mtime change.
+      - ./conf/license.json:/etc/csms/conf/license.json:ro
     depends_on:
       db-migrate:
         condition: service_completed_successfully
@@ -320,7 +343,25 @@ services:
     depends_on:
       - backend
 
-  # ─── Frontend apps (built locally from cloned sources) ──────
+  # ─── Frontend apps (Phase 10 — pulled from GHCR) ─────────────
+  #
+  # All four SPA images (csms-webapp, csms-driver, csms-pay, csms-auth)
+  # are brand-agnostic: brand identity (logo, name, theme, OAuth2
+  # client_id / scope) is delivered at runtime via the license-driven
+  # attestation chain (Phase 6/7/8/9 — main.ts loads
+  # /platform-pubkey.pem + fetches /api/v1/session/init).  No build-args
+  # are baked into the image any more.
+  #
+  # Map keys (Google Maps / Stadia / Yandex) and Stripe publishable key
+  # are still build-time inlined and currently default to empty in CI
+  # builds — those features will degrade gracefully (no map, no Stripe
+  # Payment Element) until Phase 11+ extends /session/init to ship them
+  # at runtime.  Brands needing them today must build their own private
+  # fork of csms-{webapp,driver,pay} via their own CI.
+  #
+  # `landing` is brand-specific (per-brand <brand>/landing repo, e.g.
+  # ocpp-css/landing) — kept as `build:` here.  Comment-out + uncomment
+  # the service to match what your brand has bootstrapped.
 
   landing:
     build:
@@ -334,65 +375,38 @@ services:
     healthcheck: *spa-healthcheck
 
   frontend:
-    build:
-      context: ./workdir/frontend/webapp
-      dockerfile: Dockerfile
-      args:
-        # Next.js inlines NEXT_PUBLIC_* into the JS bundle at build time.
-        # Values come from the brand's workdir/.env (populated by install.sh
-        # from envs/<env>/.env.template + secrets provider).
-        NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
-        NEXT_PUBLIC_OAUTH_CLIENT_ID: ${OAUTH_CLIENT_ID}
-        NEXT_PUBLIC_OAUTH_SCOPE: ${OAUTH_SCOPE}
-        NEXT_PUBLIC_MAP_PROVIDER: ${MAP_PROVIDER:-stadia}
-        NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY}
-        NEXT_PUBLIC_YANDEX_MAPS_API_KEY: ${YANDEX_MAPS_API_KEY}
-        NEXT_PUBLIC_STADIA_API_KEY: ${STADIA_API_KEY}
-        NEXT_PUBLIC_MAP_DEFAULT_CENTER: ${MAP_DEFAULT_CENTER:-4.35,50.85}
-        NEXT_PUBLIC_PROJECT_NAME: ${NEXT_PUBLIC_PROJECT_NAME:-Apostol CSMS}
+    image: ghcr.io/apostol-csms/csms-webapp:${PLATFORM_VERSION:-latest}
     container_name: frontend
+    env_file:
+      - ./workdir/.env
     networks:
       - lan-network
     healthcheck: *spa-healthcheck
 
   driver:
-    build:
-      context: ./workdir/frontend
-      dockerfile: driver/.docker/Dockerfile
+    image: ghcr.io/apostol-csms/csms-driver:${PLATFORM_VERSION:-latest}
     container_name: driver
     env_file:
-      - ./workdir/frontend/driver/.env
+      - ./workdir/.env
     networks:
       - lan-network
     restart: unless-stopped
     healthcheck: *spa-healthcheck
 
   pay:
-    build:
-      context: ./workdir/frontend/pay
-      dockerfile: .docker/Dockerfile
+    image: ghcr.io/apostol-csms/csms-pay:${PLATFORM_VERSION:-latest}
     container_name: pay
     env_file:
-      - ./workdir/frontend/pay/.env
+      - ./workdir/.env
     networks:
       - lan-network
     healthcheck: *spa-healthcheck
 
   auth:
-    # OAuth2 SPA — Vue 3 + Vite. Built locally from apostol-csms/auth
-    # clone (install.sh clone_sources step) with brand-specific VITE_*
-    # args baked into the bundle at build time.
-    build:
-      context: ./workdir/auth
-      args:
-        VITE_API_HOST: https://cloud.${DOMAIN:-localhost}
-        VITE_CLIENT_ID: ${OAUTH_CLIENT_ID}
-        VITE_SCOPE: ${OAUTH_SCOPE}
-        VITE_APP_TITLE: ${PROJECT_DISPLAY_NAME:-Apostol CSMS}
-        VITE_APP_LOGO: ${BRANDING_LOGO_URL:-/assets/logo.svg}
-        VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
-        VITE_DEFAULT_LOCALE: ${PROJECT_LOCALE:-en}
+    image: ghcr.io/apostol-csms/csms-auth:${PLATFORM_VERSION:-latest}
     container_name: auth
+    env_file:
+      - ./workdir/.env
     networks:
       - lan-network
     restart: unless-stopped
