@@ -176,15 +176,12 @@ services:
     networks:
       - db-network
     restart: unless-stopped
-    volumes:
-      # userlist.txt — pgbouncer's docker-entrypoint.sh regenerates this
-      # in-container from pg_authid on every start (SCRAM-SHA-256 for
-      # postgres:18 runtime roles).  Bind-mount is :rw so the in-place
-      # `mv .new .` succeeds; hooks/post-install.sh primes the host-side
-      # file as a fallback in case the in-container regen is disabled
-      # (no PGBOUNCER_SUPERPASSWORD).  pre-install.sh ensures
-      # workdir/pgbouncer/userlist.txt exists (empty) before compose up.
-      - ./workdir/pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:rw
+    # No userlist.txt bind-mount — pgbouncer's docker-entrypoint.sh
+    # regenerates it in-container from pg_authid on every start
+    # (SCRAM-SHA-256 hashes for postgres:18 runtime roles).  Bind-
+    # mounting a host file made the in-place rewrite fail (Resource busy
+    # for `mv`, Permission denied for `cat >` due to UID mismatch).
+    # The image's writable layer holds the regenerated file fine.
     depends_on:
       postgres:
         condition: service_healthy
