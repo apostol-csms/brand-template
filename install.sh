@@ -159,7 +159,55 @@ preflight() {
     err "envs/$BRAND_ENV/secrets/load-from-vault.sh missing or not executable"; exit 1
   fi
 
+  # ── Operator-supplied artefacts in <workspace>/.secrets/ ────────────
+  # CI/CD lays these down via SCP (deploy-<env>.yml), or admin places
+  # them manually for non-CI deploys. See
+  # docs/operations/brand-deployment-runbook.md for the full pipeline.
+  local PARENT="$(dirname "$SCRIPT_DIR")"
+
+  # 1. SSL is mandatory — nginx-certbot Dockerfile bakes letsencrypt/
+  #    into the image at build time (pre-install hook physical-copies
+  #    it from .secrets/ into the build context).
+  if [[ ! -d "$PARENT/.secrets/letsencrypt/live" ]]; then
+    err "$PARENT/.secrets/letsencrypt/live/ not found"
+    err "  → admin must place TLS tree there once (see runbook §5.5)"
+    err "  → typical: 'sudo cp -a /etc/letsencrypt $PARENT/.secrets/letsencrypt'"
+    exit 1
+  fi
+
+  # 2. Operator vault for the requested env.  load-from-vault.sh's
+  #    auto-detect picks file:// when this is present.
+  if [[ ! -f "$PARENT/.secrets/$BRAND_ENV.env" ]]; then
+    err "$PARENT/.secrets/$BRAND_ENV.env not found"
+    err "  → CI/CD should SCP it from BRAND_ENV_$(echo "$BRAND_ENV" | tr '[:lower:]' '[:upper:]') Secret"
+    err "  → manual: copy from your secrets vault before running install.sh"
+    exit 1
+  fi
+  local PERMS
+  PERMS="$(stat -c '%a' "$PARENT/.secrets/$BRAND_ENV.env" 2>/dev/null || echo ?)"
+  if [[ "$PERMS" != "600" && "$PERMS" != "400" ]]; then
+    err "$PARENT/.secrets/$BRAND_ENV.env permissions are $PERMS — must be 600 or 400"
+    err "  → fix: chmod 600 $PARENT/.secrets/$BRAND_ENV.env"
+    exit 1
+  fi
+
+  # 3. license.json is OPTIONAL for legacy (pre-Phase-3a) brands but
+  #    REQUIRED for license-aware ones.  Detect the brand intent by
+  #    presence of conf/license.json.example in the repo (added by
+  #    Phase-3a wiring); if present, license.json must also be in
+  #    .secrets/ on first install.  This keeps backward compat for
+  #    pre-license brands like the chargemecar 0.9.x cohort.
+  if [[ -f "$SCRIPT_DIR/conf/license.json.example" ]]; then
+    if [[ ! -f "$PARENT/.secrets/license.json" ]]; then
+      err "$PARENT/.secrets/license.json not found (license-aware brand)"
+      err "  → CI/CD should SCP it from LICENSE_JSON Secret"
+      err "  → manual: place envelope from platform issuer, see runbook §5.2"
+      exit 1
+    fi
+  fi
+
   log "  docker=$DV compose=ok disk=${DISK_GB}G ram=${RAM_MB}M tools=ok envs/$BRAND_ENV=ok"
+  log "  .secrets: letsencrypt=ok ${BRAND_ENV}.env=ok$([[ -f $PARENT/.secrets/license.json ]] && echo ' license.json=ok' || echo '')"
 }
 
 # ─── Step 3: Idempotency ─────────────────────────────────────────────
