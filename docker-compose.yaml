@@ -151,6 +151,12 @@ services:
     # next to the project.* GUCs and survives DB-level migrations.
     command:
       - "postgres"
+      # search_path: Apostol CRM expects "kernel, public" first.
+      # `$$user` is escaped from docker-compose's $-interpolation so
+      # postgres receives the literal "$user" identifier (which it then
+      # resolves to the connecting role's name at session start).
+      - "-c"
+      - 'search_path="$$user", kernel, public'
       - "-c"
       - "max_connections=200"
       - "-c"
