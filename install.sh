@@ -227,10 +227,15 @@ idempotency_check() {
 load_platform_lock() {
   local LOCK="$SCRIPT_DIR/envs/$BRAND_ENV/platform.lock.json"
   PLATFORM_VERSION="$(jq -r '.platform_version' "$LOCK")"
-  DB_REF="$(jq -r '.sources["apostol-csms/db"].ref' "$LOCK")"
-  FRONTEND_REF="$(jq -r '.sources["apostol-csms/frontend"].ref' "$LOCK")"
+  # v2 platform.lock.json (Phase 10) has no `sources` block — every
+  # platform component is a GHCR image.  Older v1 locks still have it;
+  # honour both, fall back to v${PLATFORM_VERSION} otherwise.
+  DB_REF="$(jq -r '.sources["apostol-csms/db"].ref // empty' "$LOCK")"
+  FRONTEND_REF="$(jq -r '.sources["apostol-csms/frontend"].ref // empty' "$LOCK")"
   AUTH_REF="$(jq -r '.sources["apostol-csms/auth"].ref // empty' "$LOCK")"
-  [[ -z "$AUTH_REF" ]] && AUTH_REF="v${PLATFORM_VERSION}"
+  [[ -z "$DB_REF"       ]] && DB_REF="v${PLATFORM_VERSION}"
+  [[ -z "$FRONTEND_REF" ]] && FRONTEND_REF="v${PLATFORM_VERSION}"
+  [[ -z "$AUTH_REF"     ]] && AUTH_REF="v${PLATFORM_VERSION}"
   if [[ -z "$PLATFORM_VERSION" || "$PLATFORM_VERSION" == "null" ]]; then
     err "platform.lock.json missing 'platform_version'"; exit 1
   fi

@@ -148,10 +148,15 @@ resolve_target() {
     log "override: --platform=$PLATFORM_VERSION (refs default to tag name)"
   else
     PLATFORM_VERSION="$(jq -r '.platform_version' "$LOCK")"
-    DB_REF="$(jq -r '.sources["apostol-csms/db"].ref' "$LOCK")"
-    FRONTEND_REF="$(jq -r '.sources["apostol-csms/frontend"].ref' "$LOCK")"
+    # v2 platform.lock.json (Phase 10) drops the `sources` block — every
+    # platform component is a GHCR image now.  Older v1 locks still have
+    # it; honour both.
+    DB_REF="$(jq -r '.sources["apostol-csms/db"].ref // empty' "$LOCK")"
+    FRONTEND_REF="$(jq -r '.sources["apostol-csms/frontend"].ref // empty' "$LOCK")"
     AUTH_REF="$(jq -r '.sources["apostol-csms/auth"].ref // empty' "$LOCK")"
-    [[ -z "$AUTH_REF" ]] && AUTH_REF="v${PLATFORM_VERSION}"
+    [[ -z "$DB_REF"       ]] && DB_REF="v${PLATFORM_VERSION}"
+    [[ -z "$FRONTEND_REF" ]] && FRONTEND_REF="v${PLATFORM_VERSION}"
+    [[ -z "$AUTH_REF"     ]] && AUTH_REF="v${PLATFORM_VERSION}"
   fi
 
   for V in PLATFORM_VERSION DB_REF FRONTEND_REF; do
