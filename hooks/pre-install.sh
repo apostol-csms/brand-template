@@ -68,3 +68,16 @@ if [[ -f "$PARENT/.secrets/license.json" ]]; then
   cp "$PARENT/.secrets/license.json" "$CONF_DIR/license.json"
   chmod 600 "$CONF_DIR/license.json"
 fi
+
+# ─── Empty placeholder for pgbouncer userlist bind-mount ─────────────
+#
+# docker-compose.yaml bind-mounts ./workdir/pgbouncer/userlist.txt
+# into pgbouncer at /etc/pgbouncer/userlist.txt.  Compose errors out
+# at `up` time if the source file is missing — even when downstream
+# post-install.sh would overwrite it with real SCRAM hashes.  Touch
+# an empty file here so the bind-mount succeeds; pgbouncer comes up
+# auth-empty until post-install rewrites and restarts it.
+USERLIST="$WORKDIR/pgbouncer/userlist.txt"
+mkdir -p "$(dirname "$USERLIST")"
+[[ -f "$USERLIST" ]] || : > "$USERLIST"
+chmod 600 "$USERLIST"

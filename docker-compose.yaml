@@ -172,6 +172,14 @@ services:
     networks:
       - db-network
     restart: unless-stopped
+    volumes:
+      # userlist.txt is generated post-db-init from pg_authid by
+      # hooks/post-install.sh (SCRAM-SHA-256 hashes for the 5+ runtime
+      # roles).  The image's COPY-baked userlist.txt is a placeholder;
+      # this bind-mount overrides it with the operator-side rendered
+      # version.  pre-install.sh ensures workdir/pgbouncer/userlist.txt
+      # exists (empty) BEFORE compose up so the bind-mount doesn't error.
+      - ./workdir/pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
     depends_on:
       postgres:
         condition: service_healthy
