@@ -182,8 +182,15 @@ check_tls() {
   local HOSTS=("$DOMAIN" "cloud.$DOMAIN" "api.$DOMAIN")
   local MIN_DAYS=999999 HOST_MIN=""
   for H in "${HOSTS[@]}"; do
+    # Wrap in `timeout` because openssl s_client has no built-in
+    # connection timeout: if :443 silently drops the SYN (firewall,
+    # nginx not yet up, DNS pointing elsewhere), the read on
+    # /proc/<pid>/fd hangs forever and check.sh never reaches the
+    # disk/memory/version checks below. 5 s is more than enough
+    # for a TLS handshake on the same host or LAN.
     local END
-    END="$(echo | openssl s_client -servername "$H" -connect "$H:443" 2>/dev/null \
+    END="$(timeout 5 openssl s_client -servername "$H" -connect "$H:443" \
+             </dev/null 2>/dev/null \
            | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)"
     [[ -z "$END" ]] && continue
     local END_EPOCH NOW_EPOCH DAYS
@@ -195,7 +202,7 @@ check_tls() {
     fi
   done
   if [[ "$MIN_DAYS" == "999999" ]]; then
-    record tls fail "could not read any certificate"
+    record tls fail "could not read any certificate (host unreachable on :443?)"
   elif (( MIN_DAYS < MIN_TLS_DAYS )); then
     record tls fail "$HOST_MIN expires in ${MIN_DAYS}d"
   elif (( MIN_DAYS < 30 )); then

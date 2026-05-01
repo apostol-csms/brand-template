@@ -10,8 +10,14 @@
 #     | BRAND_ENV=prod BRAND_REPO_URL=https://github.com/<brand>/csms bash
 #
 # Pipeline:
-#   1. Self-bootstrap (git clone if run via pipe)
-#   2. Pre-flight:     docker ≥24, compose v2, disk ≥20 GB, RAM ≥4 GB
+#   1. Self-bootstrap: in pipe-mode (curl|sh) install ca-certificates,
+#                      curl, git, jq, gettext via the host package
+#                      manager (apt/dnf/yum/zypper), git clone the brand
+#                      repo into /opt/<brand>/, re-exec from there.
+#   2. Pre-flight:     docker ≥24, compose v2, disk ≥20 GB, RAM ≥4 GB.
+#                      If docker is missing, offer hooks/bootstrap-host.sh
+#                      to install Docker via get.docker.com + log limits +
+#                      time sync + docker group. Operator confirms y/N.
 #   3. Platform pin:   read envs/<env>/platform.lock.json → PLATFORM_VERSION
 #   4. Merge env:      .env.template + envs/<env>/.env.template → workdir/.env
 #   5. Load secrets:   envs/<env>/secrets/load-from-vault.sh writes into workdir/
@@ -32,8 +38,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKDIR="$SCRIPT_DIR/workdir"
 REQUIRED_DOCKER_MAJOR=24
-MIN_DISK_GB=20
-MIN_RAM_MB=4096
+# Disk floor: 10 GB covers a single-brand running stack with default
+# log-rotation (50m × 3 files × ~9 containers ≈ 1.5 GB) plus ~3 GB of
+# pulled images and ~3 GB of headroom for postgres data + Docker
+# overlay layers. Bump to 20+ for prod hosts with long log retention,
+# multiple brands or a TimescaleDB-backed metrics column.
+# Override via MIN_DISK_GB env var if the host is constrained.
+MIN_DISK_GB="${MIN_DISK_GB:-10}"
+MIN_RAM_MB="${MIN_RAM_MB:-4096}"
 
 BRAND_ENV="${BRAND_ENV:-}"
 BRAND_REPO_URL="${BRAND_REPO_URL:-}"
@@ -70,7 +82,12 @@ Options:
 
 Env vars:
   BRAND_ENV          Alternative to --env=
-  BRAND_REPO_URL     Git URL of the brand repo (for self-bootstrap)
+  BRAND_REPO_URL     Git URL of the brand repo (for self-bootstrap).
+                     HTTPS or SSH (git@host:owner/repo) form supported.
+  BRAND_GIT_TOKEN    PAT with read on the brand repo (for self-bootstrap
+                     of a private repo over HTTPS). Ignored for SSH URLs
+                     and anonymous HTTPS clones. Use a fine-grained PAT
+                     scoped to read-only on this single repository.
   BRAND_INSTALL_DIR  Clone destination when self-bootstrapping
                      (default: /opt/<repo-basename>)
 EOF
@@ -93,6 +110,40 @@ done
 # If the script was run via curl|bash ($0 ends in "bash" or is not a file),
 # git clone the brand repo and re-exec from there.
 
+# ensure_minimal_tools — install curl, git, jq, gettext on a fresh host
+# so self-bootstrap can clone and run the rest. Inline copy of the
+# bootstrap-host.sh logic because we don't have it locally yet (we are
+# the curl|sh that will fetch the repo containing it).
+ensure_minimal_tools() {
+  local missing=()
+  for t in curl git jq envsubst; do
+    command -v "$t" >/dev/null 2>&1 || missing+=("$t")
+  done
+  [[ ${#missing[@]} -eq 0 ]] && return 0
+
+  log "minimal host setup needed: ${missing[*]}"
+
+  local SUDO=""
+  if [[ "$EUID" -ne 0 ]]; then
+    command -v sudo >/dev/null 2>&1 || { err "not root and sudo not found — install ${missing[*]} manually"; exit 1; }
+    SUDO="sudo"
+  fi
+
+  # Detect the package manager once; install whichever of (curl git jq
+  # gettext) are missing. envsubst lives in 'gettext'.
+  local pkgs="ca-certificates curl git jq gettext"
+  if   command -v apt-get >/dev/null 2>&1; then
+    $SUDO apt-get update -qq
+    $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $pkgs
+  elif command -v dnf >/dev/null 2>&1; then $SUDO dnf install -y $pkgs
+  elif command -v yum >/dev/null 2>&1; then $SUDO yum install -y $pkgs
+  elif command -v zypper >/dev/null 2>&1; then $SUDO zypper --non-interactive install --no-recommends $pkgs
+  else
+    err "Unsupported package manager (apt/dnf/yum/zypper expected). Install ${missing[*]} manually and retry."
+    exit 1
+  fi
+}
+
 self_bootstrap() {
   # Heuristic: BASH_SOURCE[0] is empty/non-file when run from stdin.
   if [[ -f "${BASH_SOURCE[0]:-/dev/null}" ]]; then
@@ -102,25 +153,100 @@ self_bootstrap() {
     err "Pipe install detected but BRAND_REPO_URL is unset. Set BRAND_REPO_URL=https://github.com/<brand>/csms and retry."
     exit 1
   fi
+
+  # Pipe-mode means we may be on a freshly provisioned host without git
+  # / jq / envsubst yet. Plant them before doing anything that needs them.
+  ensure_minimal_tools
+
   local BASENAME; BASENAME="$(basename "$BRAND_REPO_URL" .git)"
   local DEST="${BRAND_INSTALL_DIR:-/opt/$BASENAME}"
-  log "self-bootstrap: clone $BRAND_REPO_URL → $DEST"
+
+  # Auth path for the brand repo:
+  #   - SSH URL (git@... / ssh://...): rely on a pre-provisioned key.
+  #   - HTTPS URL: inject BRAND_GIT_TOKEN as the password if set.
+  #     Anonymous HTTPS works only for public repos.
+  local CLONE_URL="$BRAND_REPO_URL"
+  if [[ "$BRAND_REPO_URL" == https://* && -n "${BRAND_GIT_TOKEN:-}" ]]; then
+    # Strip the scheme, splice "oauth2:<token>@" in front of the host.
+    # GitHub accepts any non-empty username with a PAT; "oauth2" is a
+    # convention shared with `git credential` helpers.
+    CLONE_URL="https://oauth2:${BRAND_GIT_TOKEN}@${BRAND_REPO_URL#https://}"
+    log "self-bootstrap: clone $BRAND_REPO_URL (BRAND_GIT_TOKEN injected) → $DEST"
+  else
+    log "self-bootstrap: clone $BRAND_REPO_URL → $DEST"
+  fi
   if [[ -d "$DEST" && $FORCE -eq 0 ]]; then
     err "$DEST already exists. cd there and run ./install.sh, or remove it."
     exit 1
   fi
-  run git clone "$BRAND_REPO_URL" "$DEST"
+  if ! run git clone "$CLONE_URL" "$DEST"; then
+    err "git clone failed."
+    if [[ "$BRAND_REPO_URL" == https://* && -z "${BRAND_GIT_TOKEN:-}" ]]; then
+      err "  → if the brand repo is private, retry with BRAND_GIT_TOKEN=<PAT-with-repo:read>"
+    elif [[ "$BRAND_REPO_URL" == git@* || "$BRAND_REPO_URL" == ssh://* ]]; then
+      err "  → check that this host's SSH key is registered as a deploy key on the brand repo"
+    fi
+    exit 1
+  fi
   cd "$DEST"
   exec bash "$DEST/install.sh" "$@"
 }
 
 # ─── Step 2: Pre-flight ──────────────────────────────────────────────
 
+# offer_docker_install — interactive prompt to run hooks/bootstrap-host.sh
+# when Docker is missing. Aborts the install if the operator declines.
+# bootstrap-host.sh itself exit 0's after `usermod -aG docker` so the
+# operator re-logins; in that case install.sh terminates here too.
+offer_docker_install() {
+  local reason="$1"
+  local hook="$SCRIPT_DIR/hooks/bootstrap-host.sh"
+  if [[ ! -x "$hook" ]]; then
+    err "$reason"
+    err "  → hooks/bootstrap-host.sh not found; install Docker manually and retry."
+    exit 1
+  fi
+  warn "$reason"
+  echo
+  echo "  hooks/bootstrap-host.sh can install Docker via https://get.docker.com,"
+  echo "  write /etc/docker/daemon.json with log-rotation limits, enable"
+  echo "  systemd time-sync, and add the current user to the 'docker' group."
+  echo "  It auto-detects apt / dnf / yum / zypper."
+  echo
+  # Non-interactive context (e.g. <brand>.sh --install over SSH heredoc):
+  # /dev/tty is unavailable. install.sh reaching this point already implies
+  # the operator triggered a full deploy and opted into bootstrapping —
+  # auto-run instead of failing on an unreadable prompt. Interactive
+  # context (operator on the host) still asks first; default no.
+  local ans=""
+  if [[ -r /dev/tty ]]; then
+    read -r -p "  Run hooks/bootstrap-host.sh --docker now? [y/N] " ans </dev/tty || ans=""
+  else
+    log "non-interactive shell — auto-bootstrapping Docker via hooks/bootstrap-host.sh --docker"
+    ans=y
+  fi
+  case "${ans,,}" in
+    y|yes) ;;
+    *) err "Docker required. Install it manually (see https://docs.docker.com/engine/install/) and retry."; exit 1 ;;
+  esac
+  run "$hook" --docker
+  # If bootstrap-host.sh exit 0'd because of group membership, control
+  # never reaches here. Otherwise we have a working Docker now.
+  log "Docker installed; continuing install."
+}
+
 preflight() {
   log "pre-flight checks"
 
+  # Ensure minimal tools (curl, git, jq, envsubst) — needed by every code
+  # path. self_bootstrap already calls this in pipe-mode (curl|bash);
+  # tarball-mode installs (e.g. <brand>.sh --install) skip self_bootstrap
+  # entirely, so we'd hit "jq not found" later in the tool check below.
+  # Idempotent — exits early if all tools present.
+  ensure_minimal_tools
+
   if ! command -v docker >/dev/null 2>&1; then
-    err "docker not found"; exit 1
+    offer_docker_install "docker not found"
   fi
   local DV DMAJOR
   DV="$(docker --version | awk '{print $3}' | tr -d ,)"
@@ -130,7 +256,7 @@ preflight() {
   fi
 
   if ! docker compose version >/dev/null 2>&1; then
-    err "docker compose v2 not found"; exit 1
+    offer_docker_install "docker compose v2 plugin not found"
   fi
 
   local DISK_GB
@@ -264,6 +390,23 @@ merge_env() {
     # Pin platform version into the rendered file (authoritative source).
     printf '\n# ─── pinned by install.sh from platform.lock.json ─\n' >> "$WORKDIR/.env"
     printf 'PLATFORM_VERSION=%s\n' "$PLATFORM_VERSION" >> "$WORKDIR/.env"
+
+    # Compose project name — prefixes volumes/networks. If the brand
+    # env didn't pin one, derive it from the brand code in license.json
+    # so docker compose never falls back to a default 'csms' that would
+    # silently orphan brand-named volumes if PROJECT_NAME is added later.
+    if ! grep -qE '^PROJECT_NAME=' "$WORKDIR/.env"; then
+      local PARENT="$(dirname "$SCRIPT_DIR")"
+      local LIC="$PARENT/.secrets/license.json"
+      if [[ -f "$LIC" ]] && command -v jq >/dev/null 2>&1; then
+        local BRAND_CODE
+        BRAND_CODE="$(jq -r '.payload.brand.code // empty' "$LIC" 2>/dev/null)"
+        if [[ -n "$BRAND_CODE" ]]; then
+          printf 'PROJECT_NAME=%s\n' "$BRAND_CODE" >> "$WORKDIR/.env"
+          log "  PROJECT_NAME=$BRAND_CODE (derived from license.payload.brand.code)"
+        fi
+      fi
+    fi
     chmod 600 "$WORKDIR/.env"
   fi
 }
