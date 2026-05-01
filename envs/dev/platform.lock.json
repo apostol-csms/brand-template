@@ -2,11 +2,11 @@
   "platform_version": "0.11.1-alpha",
   "images": {
     "csms-backend": "ghcr.io/apostol-csms/csms-backend:0.11.1-alpha@sha256:7eb3c8c9756cdc537c4531b52208a9e253dad9aa78e6532b2b150512cba81821",
-    "csms-db": "ghcr.io/apostol-csms/csms-db:0.11.0-alpha@sha256:244ed924b6c9214eb83625199d79bb3de32ce21c0b9ba4df0516f270c2c1489e",
-    "csms-pay": "ghcr.io/apostol-csms/csms-pay:0.11.0-alpha@sha256:6a9cdf4e06e260afd124eb6dfd85b1ee05cf0125218288039f8bb46dce39801d",
-    "csms-driver": "ghcr.io/apostol-csms/csms-driver:0.11.0-alpha@sha256:d35b7433fde9bd57ae6f5283b8a76d23f543e205804895652dc170b9bff1f2a9",
-    "csms-webapp": "ghcr.io/apostol-csms/csms-webapp:0.11.0-alpha@sha256:15e2065f9e7ee99c489be888afcdf148fe7765440a84f0cbbe411e3effe6ecb9",
-    "csms-auth": "ghcr.io/apostol-csms/csms-auth:0.11.0-alpha@sha256:f7a9e6903641e5198d830a70fef17972228ad7bf31c101ecd71482bf1983b2a5",
-    "csms-ocpp": "ghcr.io/apostol-csms/csms-ocpp:0.11.0-alpha@sha256:68dfe638c4619ed78616b3a963dd0277c1d1ff33f1848b5a1d3f04a738086317"
+    "csms-db": "ghcr.io/apostol-csms/csms-db:0.11.1-alpha@sha256:93ee6ee676f1810097d3e87f16051a30333cd3482c9f5ab2a73a1bc938651c06",
+    "csms-pay": "ghcr.io/apostol-csms/csms-pay:0.11.1-alpha@sha256:bf47ca29395b7a290b6fb03ec2e03ded6a97fe5b30dfa0bb1432b1f0ab0fe1fb",
+    "csms-driver": "ghcr.io/apostol-csms/csms-driver:0.11.1-alpha@sha256:32cd01c7d50d7a1bfcdf05b4e7f11ad7b2dc08e28832a4a4e18b833c37fd89c9",
+    "csms-webapp": "ghcr.io/apostol-csms/csms-webapp:0.11.1-alpha@sha256:cae7376625aec5795ef0530dc787a92df5b6858483f2832534c445c9b0fa6d18",
+    "csms-auth": "ghcr.io/apostol-csms/csms-auth:0.11.1-alpha@sha256:9724b815837164b607858751167b5863a20c6a840b77ddf77f209eaf3c27cf7a",
+    "csms-ocpp": "ghcr.io/apostol-csms/csms-ocpp:0.11.1-alpha@sha256:60bc5359d3e0bf82676e558b3c5f7efdbb55c6e0a084085b24ee6b095e0cdf04"
   }
 }
