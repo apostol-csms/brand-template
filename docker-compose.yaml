@@ -404,15 +404,28 @@ services:
   # ocpp-css/landing) — kept as `build:` here.  Comment-out + uncomment
   # the service to match what your brand has bootstrapped.
 
+  # `landing` is brand-specific (per-brand <brand>/landing repo, e.g.
+  # ocpp-css/landing).  Built locally on the dev host by <brand>.sh,
+  # shipped as `<brand>-images.tar.gz` separately from the workspace
+  # tarball.  Server only sees the loaded image, no Nuxt source code,
+  # no docker compose build for it — saves ~4 GB peak RAM during
+  # build (which is what crashed root.csms before this rework).
+  #
+  # env_file ./conf/landing.env is rendered locally from
+  # ../landing/src/.env and shipped as part of the (small) workspace
+  # tarball.  Gitignored — operator manages SMTP creds locally.
   landing:
-    build:
-      context: ../landing
-      dockerfile: .docker/Dockerfile
+    image: local/${PROJECT_NAME}-landing:${PLATFORM_VERSION:-latest}
+    # pull_policy: never — `local/` is a fake registry namespace (the
+    # image is loaded via `docker load` before compose up). Without
+    # this, `docker compose pull` would try the GHCR/Hub default and
+    # fail with "pull access denied".
+    pull_policy: never
     container_name: landing
     networks:
       - lan-network
     env_file:
-      - ../landing/src/.env
+      - ./conf/landing.env
     healthcheck: *spa-healthcheck
 
   frontend:
