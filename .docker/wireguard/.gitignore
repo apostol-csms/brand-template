@@ -1,0 +1,12 @@
+# NEVER commit wireguard private keys. The build context bakes them
+# into the image — if the image is public-pulled (or the brand-repo is
+# fork-leaked), VPN identity is compromised.
+#
+# Generate keys at deploy time via keys-init.sh, or supply per-brand
+# from .secrets/<env>/wireguard/. Public keys may be committed but
+# we keep the rule simple: ignore both.
+
+server/privatekey
+server/publickey
+peers/*/privatekey
+peers/*/publickey

@@ -1,0 +1,9 @@
+name: 'postgres'
+
+services:
+
+  db:
+    image: postgres:17
+    env_file: .env
+    volumes:
+      - ./init-db:/docker-entrypoint-initdb.d
