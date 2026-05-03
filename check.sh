@@ -5,11 +5,12 @@
 # Usage:
 #   ./check.sh              # colored text, exit 0/1/2 = green/warn/fail
 #   ./check.sh --json       # machine-readable JSON for Datadog/Prometheus
+#   ./check.sh --local      # probe via 127.0.0.1 (bypass hairpin NAT)
 #
 # Checks:
 #   [containers]  all compose services running + healthy
 #   [postgres]    pg_isready from inside the container
-#   [api]         GET https://${DOMAIN}/api/v1/ping → 200
+#   [api]         GET https://cloud.${DOMAIN}/api/v1/ping → 200
 #   [openid]      GET https://auth.${DOMAIN}/.well-known/openid-configuration
 #   [ocpp]        TCP connect :9220
 #   [frontend]    GET https://${DOMAIN}/ → 200 (landing)
@@ -17,6 +18,13 @@
 #   [disk]        filesystem < 85% (warn) / < 90% (fail)
 #   [memory]      MemAvailable ≥ 1 GB
 #   [version]     workdir/.installed-version matches docker image tag
+#
+# --local mode: api/openid/frontend probes connect to 127.0.0.1:443 with
+# `--resolve <host>:443:127.0.0.1` (so Host header + SNI стой правильные,
+# а TCP идёт на loopback). TLS check тоже свитчает openssl s_client на
+# 127.0.0.1:443 с сохранением -servername. Нужно на VPS без hairpin NAT
+# (хост не достучивается до собственного публичного IP) — типичный кейс
+# дешёвых RU-провайдеров. По умолчанию выключено.
 #
 # Exit codes: 0 = all ok, 1 = at least one warn, 2 = at least one fail.
 
@@ -27,6 +35,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKDIR="$SCRIPT_DIR/workdir"
 JSON=0
+LOCAL=0
 MIN_TLS_DAYS=7
 DISK_WARN_PCT=85
 DISK_FAIL_PCT=90
@@ -48,11 +57,14 @@ fi
 for ARG in "$@"; do
   case "$ARG" in
     --json)   JSON=1 ;;
+    --local)  LOCAL=1 ;;
     -h|--help)
       cat <<EOF
-Usage: ./check.sh [--json]
-  --json   Emit JSON (one-line, per-check status) instead of colored text.
-  Exit:  0 = all ok, 1 = warn, 2 = fail.
+Usage: ./check.sh [--json] [--local]
+  --json    Emit JSON (one-line, per-check status) instead of colored text.
+  --local   Probe via 127.0.0.1 (bypass hairpin NAT). Use on VPS where
+            the host can't reach its own public IP from inside.
+  Exit:     0 = all ok, 1 = warn, 2 = fail.
 EOF
       exit 0 ;;
     *) echo "Unknown arg: $ARG" >&2; exit 2 ;;
@@ -85,6 +97,22 @@ fi
 DOMAIN="${DOMAIN:-localhost}"
 INSTALLED_VERSION="$(cat "$WORKDIR/.installed-version" 2>/dev/null || echo "")"
 compose_cmd() { docker compose --env-file "$WORKDIR/.env" "$@"; }
+
+# Resolve helper: in --local mode forces TCP target to 127.0.0.1 while
+# keeping Host/SNI = $1 (nginx server-block selection by SNI stays
+# correct, the certificate is presented for the FQDN). Caller passes
+# a host name, populates global RESOLVE_ARGS as a curl-args array.
+RESOLVE_ARGS=()
+set_resolve() {
+  local HOST="$1"
+  RESOLVE_ARGS=()
+  if [[ $LOCAL -eq 1 ]]; then
+    RESOLVE_ARGS=(
+      --resolve "${HOST}:443:127.0.0.1"
+      --resolve "${HOST}:80:127.0.0.1"
+    )
+  fi
+}
 
 # ─── Checks ──────────────────────────────────────────────────────────
 
@@ -130,7 +158,9 @@ check_api_ping() {
   [[ "$DOMAIN" == "localhost" ]] && HOST="$DOMAIN"
   local URL="https://${HOST}/api/v1/ping"
   local CODE
-  CODE="$(curl -ks -o /dev/null -w '%{http_code}' --max-time 5 "$URL" 2>/dev/null)"
+  set_resolve "$HOST"
+  CODE="$(curl -ks -o /dev/null -w '%{http_code}' --max-time 5 \
+            "${RESOLVE_ARGS[@]}" "$URL" 2>/dev/null)"
   if [[ "$CODE" == "200" ]]; then
     record api ok "$URL → 200"
   elif [[ "$DOMAIN" == "localhost" ]]; then
@@ -141,9 +171,12 @@ check_api_ping() {
 }
 
 check_openid() {
-  local URL="https://auth.${DOMAIN}/.well-known/openid-configuration"
+  local HOST="auth.${DOMAIN}"
+  local URL="https://${HOST}/.well-known/openid-configuration"
   local CODE
-  CODE="$(curl -ks -o /dev/null -w '%{http_code}' --max-time 5 "$URL" 2>/dev/null)"
+  set_resolve "$HOST"
+  CODE="$(curl -ks -o /dev/null -w '%{http_code}' --max-time 5 \
+            "${RESOLVE_ARGS[@]}" "$URL" 2>/dev/null)"
   if [[ "$CODE" == "200" ]]; then
     record openid ok
   elif [[ "$DOMAIN" == "localhost" ]]; then
@@ -162,10 +195,13 @@ check_ocpp_tcp() {
 }
 
 check_frontend_landing() {
-  local URL="https://${DOMAIN}/"
+  local HOST="${DOMAIN}"
+  local URL="https://${HOST}/"
   local CODE
-  CODE="$(curl -ks -o /dev/null -w '%{http_code}' --max-time 5 "$URL" 2>/dev/null)"
-  if [[ "$CODE" == "200" || "$CODE" == "301" || "$CODE" == "302" ]]; then
+  set_resolve "$HOST"
+  CODE="$(curl -ks -o /dev/null -w '%{http_code}' --max-time 5 \
+            "${RESOLVE_ARGS[@]}" "$URL" 2>/dev/null)"
+  if [[ "$CODE" == "200" || "$CODE" == "301" || "$CODE" == "302" || "$CODE" == "307" || "$CODE" == "308" ]]; then
     record frontend ok "landing $URL → $CODE"
   elif [[ "$DOMAIN" == "localhost" ]]; then
     record frontend warn "$URL → $CODE"
@@ -188,8 +224,14 @@ check_tls() {
     # /proc/<pid>/fd hangs forever and check.sh never reaches the
     # disk/memory/version checks below. 5 s is more than enough
     # for a TLS handshake on the same host or LAN.
+    #
+    # In --local mode we connect to 127.0.0.1:443 but keep -servername
+    # = $H, so SNI selects the right nginx server-block and the
+    # certificate presented matches the FQDN we want to inspect.
+    local CONNECT="$H:443"
+    [[ $LOCAL -eq 1 ]] && CONNECT="127.0.0.1:443"
     local END
-    END="$(timeout 5 openssl s_client -servername "$H" -connect "$H:443" \
+    END="$(timeout 5 openssl s_client -servername "$H" -connect "$CONNECT" \
              </dev/null 2>/dev/null \
            | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)"
     [[ -z "$END" ]] && continue
