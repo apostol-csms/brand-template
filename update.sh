@@ -233,6 +233,13 @@ rebuild_local() {
   else
     SERVICES="landing nginx pgbouncer pgweb"
   fi
+  # Drop services not declared in this brand's compose (e.g. plugme has
+  # no landing). Skip build entirely if nothing remains buildable.
+  SERVICES="$(filter_present_services "$SERVICES")"
+  if [[ -z "$SERVICES" ]]; then
+    log "docker compose build: (no buildable services declared — skipping)"
+    return 0
+  fi
   log "docker compose build: $SERVICES"
   # shellcheck disable=SC2086
   run compose_cmd build $SERVICES
