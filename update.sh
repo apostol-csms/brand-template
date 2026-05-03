@@ -275,13 +275,29 @@ run_db_migrate() {
 SPA_SERVICES="landing frontend driver pay auth"
 WAIT_HEALTHY_MAX_S=120
 
+# Filter SPA_SERVICES + UPSTREAM lists down to services actually present
+# in the brand's docker-compose.yaml. Brands that omit `landing` (e.g.
+# plugme) would otherwise hard-fail rolling_restart with "no such service".
+filter_present_services() {
+  local LIST="$1" PRESENT="" ALL
+  ALL="$(compose_cmd config --services 2>/dev/null)"
+  for svc in $LIST; do
+    if echo "$ALL" | grep -qx "$svc"; then
+      PRESENT="$PRESENT $svc"
+    fi
+  done
+  echo "${PRESENT# }"
+}
+
 wait_spas_healthy() {
   [[ $DRY_RUN -eq 1 ]] && { log "[dry-run] skip wait_spas_healthy"; return 0; }
   log "  wait SPAs healthy (max ${WAIT_HEALTHY_MAX_S}s)…"
+  local SPAS_PRESENT
+  SPAS_PRESENT="$(filter_present_services "$SPA_SERVICES")"
   local t=0 pending
   while (( t < WAIT_HEALTHY_MAX_S )); do
     pending=""
-    for svc in $SPA_SERVICES; do
+    for svc in $SPAS_PRESENT; do
       local status
       status="$(compose_cmd ps --format json "$svc" 2>/dev/null \
                 | jq -rs '.[0].Health // "unknown"' 2>/dev/null || echo unknown)"
@@ -306,6 +322,8 @@ rolling_restart() {
   else
     UPSTREAM="backend ocpp $SPA_SERVICES pgbouncer pgweb"
   fi
+  # Drop services not declared in the brand's docker-compose.yaml.
+  UPSTREAM="$(filter_present_services "$UPSTREAM")"
   log "rolling restart (phase 1 — upstreams): $UPSTREAM"
   # shellcheck disable=SC2086
   run compose_cmd up -d --no-deps --force-recreate $UPSTREAM
