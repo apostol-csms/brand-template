@@ -20,6 +20,9 @@
 #                      time sync + docker group. Operator confirms y/N.
 #   3. Platform pin:   read envs/<env>/platform.lock.json → PLATFORM_VERSION
 #   4. Merge env:      .env.template + envs/<env>/.env.template → workdir/.env
+#  4b. Identity gate:  refuse to install while currency / country_code /
+#                      payment_system are blank — they denominate the database
+#                      and nothing re-syncs them after install
 #   5. Load secrets:   envs/<env>/secrets/load-from-vault.sh writes into workdir/
 #   6. Clone sources:  apostol-csms/{db,frontend} at pinned tag → workdir/
 #   7. Pull images:    csms-backend + csms-ocpp from GHCR (public, no auth)
@@ -411,6 +414,57 @@ merge_env() {
   fi
 }
 
+# ─── Step 5b: Market identity must be pinned, not guessed ────────────
+#
+# These three shape the database at install and nothing re-syncs them
+# afterwards: configuration/csms/init.sql snapshots project.currency into the
+# registry (CONFIG\CurrentProject\Currency), and every currency-derived seed —
+# accounts, price rows, the fleet per-kWh rate — follows that snapshot. Fixing
+# the env later does not move it; only a reinstall does.
+#
+# So a blank or defaulted value here is not a cosmetic gap, it is a
+# denomination decision made by accident. ChargeMeCar's stage installed with
+# the root template's USD placeholder and ran that way unnoticed: 29 accounts
+# and all monthly prices in USD on a EUR brand, plus a legacy fleet.kwh row at
+# 0.68 — the same two-orders-of-magnitude error P00000018's header warns about,
+# wearing a different currency label. Nothing failed, because a plausible wrong
+# answer is indistinguishable from a right one at install time.
+#
+# The list is deliberately minimal — exactly the values that have no safe
+# default and are consumed by the seed. PROJECT_LOCALE keeps its 'en' default;
+# PROJECT_NAME has the license-derived fallback above. Extend only for a value
+# that would otherwise be silently guessed.
+#
+# Guarding install and not update is on purpose: update.sh never re-merges the
+# env and the registry is already written by then, so a check there would flag
+# a state it cannot repair. If an existing brand has the wrong denomination,
+# the fix is a reinstall, not an env edit.
+
+REQUIRED_IDENTITY=(PROJECT_CURRENCY PROJECT_COUNTRY_CODE PROJECT_PAYMENT_SYSTEM)
+
+validate_identity() {
+  log "validate market identity (${#REQUIRED_IDENTITY[@]} keys)"
+  [[ $DRY_RUN -eq 1 && ! -f "$WORKDIR/.env" ]] && return 0
+
+  local missing=() key val
+  for key in "${REQUIRED_IDENTITY[@]}"; do
+    # Last assignment wins in the merged file, same as `source` would see.
+    val="$(grep -E "^${key}=" "$WORKDIR/.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"'"'"' ')"
+    [[ -z "$val" ]] && missing+=("$key")
+  done
+
+  if (( ${#missing[@]} )); then
+    err "market identity not pinned: ${missing[*]}"
+    err "  pin these in envs/$BRAND_ENV/.env.template, then re-run."
+    err "  They are seeded into the database at install and nothing re-syncs"
+    err "  them later — a wrong currency means a reinstall, not an env edit."
+    err "  Reference: apostol-csms/db/sql/.env/<brand>/.env.psql is the"
+    err "  SQL-side source of truth for this brand's values."
+    exit 1
+  fi
+  log "  currency/country/payment_system pinned"
+}
+
 # ─── Step 6: Load secrets ────────────────────────────────────────────
 
 load_secrets() {
@@ -573,6 +627,7 @@ preflight
 idempotency_check
 load_platform_lock
 merge_env
+validate_identity
 load_secrets
 clone_sources
 render_app_env
