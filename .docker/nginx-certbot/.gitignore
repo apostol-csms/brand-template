@@ -1,0 +1,21 @@
+# default.conf is rendered from default.conf.template by entrypoint.sh
+default.conf
+
+# certbot/letsencrypt is populated by hooks/pre-install.sh at deploy time — it
+# copies from the sibling .secrets/letsencrypt/ into this build context because
+# docker build refuses to follow symlinks outside of its context directory.
+certbot/letsencrypt/
+
+# Everything under frontend/ stays TRACKED — no blanket ignore here.
+#
+# frontend/docs is the Swagger UI bundle the image serves at /docs/
+# (Dockerfile: COPY ./frontend/docs /var/www/docs). Ignoring frontend/ wholesale,
+# as ocpp-css and plugme used to, left a fresh clone with nothing for that COPY
+# to find. The api.yaml inside it is generated per brand by tools/mk-openapi.py
+# in the platform workspace.
+#
+# frontend/php — a dead contact-form mailer carrying a plaintext SMTP password —
+# was deleted from the build context on 2026-08-06, together with the php-fpm
+# packages and their startup in entrypoint.sh. No ignore rule is left behind on
+# purpose: if that directory ever reappears it should show up in `git status`,
+# not be hidden.

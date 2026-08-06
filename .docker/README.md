@@ -74,6 +74,18 @@ work beyond the standard install.sh flow.
   brand-extensible `extra-domains.conf.d/` slot), tracked as
   zero-build doc tech debt #15.
 
+  **Partially migrated 2026-08-06**: `nginx-certbot/frontend/docs/` (the
+  Swagger UI served at `/docs/`) and `nginx-certbot/.gitignore` now live
+  here. The rest — `Dockerfile`, `nginx.conf`, `default.conf.template`,
+  `includes/`, `entrypoint.sh` — is still copied from an existing brand
+  when standing up a new one. Reason for taking this piece first: the
+  three brands had three different ignore files, two of which excluded
+  `frontend/` wholesale, so their Swagger bundle and its `api.yaml` were
+  untracked local artefacts — a fresh clone had nothing for the
+  Dockerfile's `COPY ./frontend/docs` to find. See
+  `nginx-certbot/frontend/docs/README.md` for how `api.yaml` is
+  generated per brand.
+
 ## Security findings — separate cleanup tickets
 
 Audit on 2026-05-04 surfaced two leaks-in-git that are independent of

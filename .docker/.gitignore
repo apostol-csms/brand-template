@@ -1,0 +1,8 @@
+# NOTE: this file used to start with a `.gitignore` line, which made every
+# ignore file under .docker/ untracked — including this one. That is how the
+# three brands ended up with three different nginx-certbot/.gitignore files
+# nobody could see or review. Ignore rules are part of the build contract:
+# keep them versioned.
+
+www/
+docker-compose.yml
