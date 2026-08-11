@@ -8,4 +8,11 @@ auth_type = scram-sha-256
 auth_file = /etc/pgbouncer/userlist.txt
 pool_mode = session
 max_client_conn = 500
-default_pool_size = 50
+default_pool_size = ${PGBOUNCER_DEFAULT_POOL_SIZE}
+; Ceiling on server connections to the database, across all pools.
+; default_pool_size is per (database, user) pair, so without this the
+; theoretical total is pool_size x number of pooled roles — 350 against a
+; max_connections of 200. Also note apibot connects to postgres DIRECTLY
+; (PGHOSTAPI in compose), roughly 64 slots with WORKER_PROCESSES=8, so
+; pgbouncer's share has to leave room for it.
+max_db_connections = ${PGBOUNCER_MAX_DB_CONNECTIONS}

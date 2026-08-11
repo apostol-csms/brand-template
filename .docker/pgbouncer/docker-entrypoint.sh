@@ -19,10 +19,13 @@
 # static userlist.txt baked into the image (legacy behaviour).
 set -eu
 
-: "${DB_NAME:=csms}"
-export DB_NAME
+export DB_NAME="${DB_NAME:-csms}"
+# Pool sizing. Keep max_db_connections below postgres' max_connections minus
+# what connects directly (apibot) — see pgbouncer.ini.template.
+export PGBOUNCER_DEFAULT_POOL_SIZE="${PGBOUNCER_DEFAULT_POOL_SIZE:-50}"
+export PGBOUNCER_MAX_DB_CONNECTIONS="${PGBOUNCER_MAX_DB_CONNECTIONS:-100}"
 
-envsubst '$DB_NAME' \
+envsubst '$DB_NAME $PGBOUNCER_DEFAULT_POOL_SIZE $PGBOUNCER_MAX_DB_CONNECTIONS' \
   < /etc/pgbouncer/pgbouncer.ini.template \
   > /etc/pgbouncer/pgbouncer.ini
 
