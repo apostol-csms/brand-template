@@ -504,35 +504,21 @@ services:
     restart: unless-stopped
     healthcheck: *spa-healthcheck
 
-  # ─── Optional ───────────────────────────────────────────────
-
-  stripe-cli:
-    image: stripe/stripe-cli:latest
-    container_name: stripe-cli
-    networks:
-      - lan-network
-    command: ["listen", "--api-key", "${STRIPE_API_KEY}", "--device-name", "${PROJECT_NAME:-csms}-${BUILD_ENV:-dev}", "--skip-update", "--forward-to", "http://backend:4977/stripe/webhook"]
-    depends_on:
-      - backend
-    restart: unless-stopped
-    profiles:
-      - stripe
-
   # ─── AI support agent ─────────────────────────────────────────────────────
   #
-  # Opt-in per brand: nothing runs without `--profile ai`, and CONFIG\AI
-  # ServiceURL then simply points at a host that is not up. Turning it on for a
-  # brand means setting the profile in that brand's env AND giving it a provider
-  # key below.
+  # Part of the default stack, like every other upstream. It was gated behind
+  # `--profile ai` while the image did not exist yet; now that the platform
+  # ships it, an opt-in switch only bought a CONFIG\AI ServiceURL pointing at a
+  # host nobody started. What stays per-brand is which provider answers, and
+  # whether a key is present at all — that lives in LLM_PROVIDER and the vault.
+  # A missing key is reported in the driver's chat; it does not stop the
+  # container.
   #
   # lan only. The service never faces outward and never touches the database:
   # PGFetch calls it from api.ai_send, and it calls our own REST back with the
   # driver's token, so every platform ACL applies as usual. That is also why
   # ALLOWED_API_URLS and SERVICE_KEY are empty here — both exist for a
   # deployment that publishes the service through nginx.
-  #
-  # NOTE: the image does not exist until a release builds and pushes it. This
-  # block is here so the wiring is recorded, not because the agent ships today.
   #
   # Provider choice is a brand decision, not a platform one. A brand operating
   # in Russia should run yandex or gigachat: OpenAI answers 403
@@ -576,8 +562,20 @@ services:
       LOG_LEVEL: ${AI_LOG_LEVEL:-info}
     depends_on:
       - backend
+
+  # ─── Optional ───────────────────────────────────────────────
+
+  stripe-cli:
+    image: stripe/stripe-cli:latest
+    container_name: stripe-cli
+    networks:
+      - lan-network
+    command: ["listen", "--api-key", "${STRIPE_API_KEY}", "--device-name", "${PROJECT_NAME:-csms}-${BUILD_ENV:-dev}", "--skip-update", "--forward-to", "http://backend:4977/stripe/webhook"]
+    depends_on:
+      - backend
+    restart: unless-stopped
     profiles:
-      - ai
+      - stripe
 
 networks:
   wan-network:

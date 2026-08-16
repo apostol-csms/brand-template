@@ -327,7 +327,7 @@ rolling_restart() {
   if [[ $FRONTEND_ONLY -eq 1 ]]; then
     UPSTREAM="$SPA_SERVICES"
   else
-    UPSTREAM="backend ocpp $SPA_SERVICES pgbouncer pgweb"
+    UPSTREAM="backend ocpp ai-service $SPA_SERVICES pgbouncer pgweb"
   fi
   # Drop services not declared in the brand's docker-compose.yaml.
   UPSTREAM="$(filter_present_services "$UPSTREAM")"
