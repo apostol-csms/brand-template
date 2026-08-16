@@ -29,6 +29,13 @@
 #   GOOGLE_{PROJECT_ID,CLIENT_ID,CLIENT_SECRET}
 #   STADIA_API_KEY / GOOGLE_MAPS_API_KEY / YANDEX_MAPS_API_KEY
 #
+#   AI agent (only when the `ai` compose profile is on):
+#     OPENAI_API_KEY / ANTHROPIC_API_KEY  — foreign providers
+#     YANDEX_API_KEY + YANDEX_FOLDER_ID   — YandexGPT
+#     GIGACHAT_API_KEY                    — Sber GigaChat
+#     AI_SERVICE_KEY                      — X-AI-Key, only if published via nginx
+#     AI_HTTP_PROXY                       — carries credentials, hence a secret
+#
 # ── Reference implementations ────────────────────────────────────────
 #
 # 1) Shell env (simplest — good for local dev):

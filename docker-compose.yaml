@@ -518,6 +518,67 @@ services:
     profiles:
       - stripe
 
+  # ─── AI support agent ─────────────────────────────────────────────────────
+  #
+  # Opt-in per brand: nothing runs without `--profile ai`, and CONFIG\AI
+  # ServiceURL then simply points at a host that is not up. Turning it on for a
+  # brand means setting the profile in that brand's env AND giving it a provider
+  # key below.
+  #
+  # lan only. The service never faces outward and never touches the database:
+  # PGFetch calls it from api.ai_send, and it calls our own REST back with the
+  # driver's token, so every platform ACL applies as usual. That is also why
+  # ALLOWED_API_URLS and SERVICE_KEY are empty here — both exist for a
+  # deployment that publishes the service through nginx.
+  #
+  # NOTE: the image does not exist until a release builds and pushes it. This
+  # block is here so the wiring is recorded, not because the agent ships today.
+  #
+  # Provider choice is a brand decision, not a platform one. A brand operating
+  # in Russia should run yandex or gigachat: OpenAI answers 403
+  # unsupported_country_region_territory from a Russian address, and a
+  # dependency on a foreign LLM is a blocker in its own right for the national
+  # software registry filing.
+  ai-service:
+    image: ghcr.io/apostol-csms/csms-ai-service:${PLATFORM_VERSION:-latest}
+    pull_policy: always
+    container_name: ai-service
+    networks:
+      - lan-network
+    restart: unless-stopped
+    environment:
+      # 0.0.0.0 on the lan network; 127.0.0.1 only when the service runs on
+      # the host network behind nginx.
+      HOST: ${AI_HOST:-0.0.0.0}
+      PORT: ${AI_PORT:-8000}
+      API_URL: ${AI_API_URL:-http://backend:4977}
+      ALLOWED_API_URLS: ${AI_ALLOWED_API_URLS:-}
+      SERVICE_KEY: ${AI_SERVICE_KEY:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      YANDEX_API_KEY: ${YANDEX_API_KEY:-}
+      YANDEX_FOLDER_ID: ${YANDEX_FOLDER_ID:-}
+      GIGACHAT_API_KEY: ${GIGACHAT_API_KEY:-}
+      LLM_BASE_URL: ${AI_LLM_BASE_URL:-}
+      HTTP_PROXY: ${AI_HTTP_PROXY:-}
+      # Only ever reaches the LLM client; calls to our own REST are built with
+      # trust_env=False and ignore it either way.
+      NO_PROXY: ${AI_NO_PROXY:-localhost,127.0.0.1,backend,ocpp,ai-service,postgres,pgbouncer}
+      # Declares that this deployment cannot reach a FOREIGN provider without
+      # the proxy — /health then treats a missing one as a missing credential
+      # instead of reporting a service that looks ready and answers 403 to
+      # everything. Irrelevant once the provider is Russian.
+      REQUIRE_PROXY: ${AI_REQUIRE_PROXY:-false}
+      DEFAULT_MODEL: ${AI_DEFAULT_MODEL:-gpt-5.6-terra}
+      ACTION_RATE_LIMIT: ${AI_ACTION_RATE_LIMIT:-5}
+      ACTION_DEBOUNCE_SECONDS: ${AI_ACTION_DEBOUNCE_SECONDS:-5}
+      LOG_LEVEL: ${AI_LOG_LEVEL:-info}
+    depends_on:
+      - backend
+    profiles:
+      - ai
+
 networks:
   wan-network:
   lan-network:
