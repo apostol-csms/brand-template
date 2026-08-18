@@ -493,8 +493,6 @@ load_secrets() {
 
 clone_sources() {
   log "clone brand-specific sources at $PLATFORM_VERSION"
-  # shellcheck disable=SC1091
-  [[ $DRY_RUN -eq 0 ]] && source "$WORKDIR/.env"
 
   # Landing is per-brand: <brand>/landing — sibling clone, not under
   # workdir/.  install.sh assumes it already exists if the operator has
