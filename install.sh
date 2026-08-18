@@ -25,7 +25,8 @@
 #                      and nothing re-syncs them after install
 #   5. Load secrets:   envs/<env>/secrets/load-from-vault.sh writes into workdir/
 #   6. Clone sources:  apostol-csms/{db,frontend} at pinned tag → workdir/
-#   7. Pull images:    csms-backend + csms-ocpp from GHCR (public, no auth)
+#   7. Pull images:    all platform images from $REGISTRY (docker login
+#                      first when REGISTRY_USER/REGISTRY_PASS are set)
 #   8. Pre-install hook
 #   9. Local build:    docker compose build (db-init + 4 frontend apps + infra)
 #  10. First boot:     postgres → db-init → db-migrate → rest
@@ -501,10 +502,41 @@ clone_sources() {
   log "  (no platform repos to clone in pure-image mode)"
 }
 
-# ─── Step 8: Pull images ─────────────────────────────────────────────
+# ─── Step 8: Registry login + pull images ────────────────────────────
+
+# ─── Вход в реестр образов ───────────────────────────────────────────
+#
+# Нужен, когда REGISTRY указывает на приватный реестр (например,
+# собственное зеркало бренда). Для публичного ghcr.io шаг пропускается:
+# переменные не заданы — логина нет, поведение прежнее.
+#
+# Значения читаются из workdir/.env, а не из окружения скрипта: их кладёт
+# туда envs/<env>/secrets/load-from-vault.sh по префиксу REGISTRY_, и в
+# committed-шаблонах учётных данных быть не должно.
+env_get() {
+  [[ -r "$WORKDIR/.env" ]] || return 0
+  sed -n "s/^$1=//p" "$WORKDIR/.env" | tail -1 | sed -e 's/^"//' -e 's/"$//'
+}
+
+registry_login() {
+  local RU RP HOST
+  RU="$(env_get REGISTRY_USER)"; RP="$(env_get REGISTRY_PASS)"
+  if [[ -z "$RU" || -z "$RP" ]]; then
+    log "registry login: skipped (REGISTRY_USER/REGISTRY_PASS not set)"
+    return 0
+  fi
+  HOST="$(env_get REGISTRY)"; HOST="${HOST:-ghcr.io}"
+  HOST="${HOST%%/*}"          # registry.example.ru/base → registry.example.ru
+  log "registry login: $HOST as $RU"
+  if [[ $DRY_RUN -eq 1 ]]; then
+    log "  (dry-run — not logging in)"
+    return 0
+  fi
+  printf '%s' "$RP" | docker login "$HOST" -u "$RU" --password-stdin
+}
 
 pull_images() {
-  log "pull all platform images from ghcr.io/apostol-csms/* (Phase 10)"
+  log "pull all platform images from ${REGISTRY:-ghcr.io/apostol-csms}/*"
   # `compose pull` reads images from compose itself — picks up
   # PLATFORM_VERSION from workdir/.env automatically.  Brand-specific
   # `landing` (build: context) is skipped by --ignore-buildable.
@@ -631,6 +663,7 @@ validate_identity
 load_secrets
 clone_sources
 render_app_env
+registry_login
 pull_images
 run_hook pre-install.sh
 build_local

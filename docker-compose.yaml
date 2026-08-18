@@ -14,7 +14,7 @@
 #
 # Conventions:
 #   - Platform: backend, ocpp, db-init/db-migrate, frontend, driver, pay,
-#     auth → image: ghcr.io/apostol-csms/csms-*:${PLATFORM_VERSION}.
+#     auth → image: ${REGISTRY:-ghcr.io/apostol-csms}/csms-*:${PLATFORM_VERSION}.
 #   - csms-db image ships encrypted SQL (Phase 4c) — runtime decryption
 #     via license envelope's db_key_wrapped, no source code on the brand
 #     side.
@@ -73,7 +73,10 @@ x-spa-healthcheck: &spa-healthcheck
 services:
 
   nginx:
-    build: ./.docker/nginx-certbot
+    build:
+      context: ./.docker/nginx-certbot
+      args:
+        BASE_REGISTRY: ${BASE_REGISTRY:-docker.io/library}
     container_name: nginx
     hostname: ${DOMAIN:-localhost}
     environment:
@@ -150,7 +153,7 @@ services:
   # ─── Database ─────────────────────────────────────────────
 
   postgres:
-    image: postgres:18
+    image: ${BASE_REGISTRY:-docker.io/library}/postgres:18
     container_name: postgres
     cap_add:
       - NET_ADMIN
@@ -243,7 +246,10 @@ services:
       retries: 3
 
   pgbouncer:
-    build: ./.docker/pgbouncer
+    build:
+      context: ./.docker/pgbouncer
+      args:
+        PGBOUNCER_IMAGE: ${PGBOUNCER_IMAGE:-edoburu/pgbouncer:latest}
     container_name: pgbouncer
     networks:
       - db-network
@@ -271,7 +277,10 @@ services:
       retries: 3
 
   pgweb:
-    build: ./.docker/pgweb
+    build:
+      context: ./.docker/pgweb
+      args:
+        PGWEB_IMAGE: ${PGWEB_IMAGE:-sosedoff/pgweb:latest}
     container_name: pgweb
     restart: unless-stopped
     networks:
@@ -294,7 +303,7 @@ services:
   # at runtime via license envelope's db_key_wrapped (Phase 4c).
 
   db-init:
-    image: ghcr.io/apostol-csms/csms-db:${PLATFORM_VERSION:-latest}
+    image: ${REGISTRY:-ghcr.io/apostol-csms}/csms-db:${PLATFORM_VERSION:-latest}
     container_name: db-init
     entrypoint: ["/opt/csms-db/docker/init.sh"]
     networks:
@@ -318,7 +327,7 @@ services:
     restart: "no"
 
   db-migrate:
-    image: ghcr.io/apostol-csms/csms-db:${PLATFORM_VERSION:-latest}
+    image: ${REGISTRY:-ghcr.io/apostol-csms}/csms-db:${PLATFORM_VERSION:-latest}
     container_name: db-migrate
     entrypoint: ["/opt/csms-db/docker/migrate.sh"]
     networks:
@@ -346,7 +355,7 @@ services:
   # ─── Platform services (pulled from GHCR) ───────────────────
 
   backend:
-    image: ghcr.io/apostol-csms/csms-backend:${PLATFORM_VERSION:-latest}
+    image: ${REGISTRY:-ghcr.io/apostol-csms}/csms-backend:${PLATFORM_VERSION:-latest}
     container_name: backend
     networks:
       - lan-network
@@ -383,7 +392,7 @@ services:
         condition: service_started
 
   ocpp:
-    image: ghcr.io/apostol-csms/csms-ocpp:${PLATFORM_VERSION:-latest}
+    image: ${REGISTRY:-ghcr.io/apostol-csms}/csms-ocpp:${PLATFORM_VERSION:-latest}
     container_name: ocpp
     networks:
       - lan-network
@@ -463,11 +472,15 @@ services:
     networks:
       - lan-network
     env_file:
-      - ./conf/landing.env
+      # required:false — conf/ создаётся hooks/pre-install.sh из .secrets/
+      # и в репозитории отсутствует. Без этого флага свежий клон шаблона
+      # не проходит даже `docker compose config`.
+      - path: ./conf/landing.env
+        required: false
     healthcheck: *spa-healthcheck
 
   frontend:
-    image: ghcr.io/apostol-csms/csms-webapp:${PLATFORM_VERSION:-latest}
+    image: ${REGISTRY:-ghcr.io/apostol-csms}/csms-webapp:${PLATFORM_VERSION:-latest}
     container_name: frontend
     env_file:
       - ./workdir/.env
@@ -476,7 +489,7 @@ services:
     healthcheck: *spa-healthcheck
 
   driver:
-    image: ghcr.io/apostol-csms/csms-driver:${PLATFORM_VERSION:-latest}
+    image: ${REGISTRY:-ghcr.io/apostol-csms}/csms-driver:${PLATFORM_VERSION:-latest}
     container_name: driver
     env_file:
       - ./workdir/.env
@@ -486,7 +499,7 @@ services:
     healthcheck: *spa-healthcheck
 
   pay:
-    image: ghcr.io/apostol-csms/csms-pay:${PLATFORM_VERSION:-latest}
+    image: ${REGISTRY:-ghcr.io/apostol-csms}/csms-pay:${PLATFORM_VERSION:-latest}
     container_name: pay
     env_file:
       - ./workdir/.env
@@ -495,7 +508,7 @@ services:
     healthcheck: *spa-healthcheck
 
   auth:
-    image: ghcr.io/apostol-csms/csms-auth:${PLATFORM_VERSION:-latest}
+    image: ${REGISTRY:-ghcr.io/apostol-csms}/csms-auth:${PLATFORM_VERSION:-latest}
     container_name: auth
     env_file:
       - ./workdir/.env
@@ -526,7 +539,7 @@ services:
   # dependency on a foreign LLM is a blocker in its own right for the national
   # software registry filing.
   ai-service:
-    image: ghcr.io/apostol-csms/csms-ai-service:${PLATFORM_VERSION:-latest}
+    image: ${REGISTRY:-ghcr.io/apostol-csms}/csms-ai-service:${PLATFORM_VERSION:-latest}
     pull_policy: always
     container_name: ai-service
     networks:

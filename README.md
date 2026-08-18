@@ -28,13 +28,65 @@ cd csms
 $EDITOR envs/prod/.env.template
 $EDITOR envs/prod/platform.lock.json   # bump PLATFORM_VERSION + digests
 
-# 3. Implement the secrets loader. See envs/prod/secrets/load-from-vault.sh
-#    for the contract and 5 reference implementations.
-$EDITOR envs/prod/secrets/load-from-vault.sh
+# 3. Put the secrets where the loader will find them. The shipped
+#    envs/<env>/secrets/load-from-vault.sh is a working multi-provider
+#    dispatcher (file / env / vault / aws-sm), not a stub — for the
+#    simplest case just create ../.secrets/prod.env.
+$EDITOR ../.secrets/prod.env
 
-# 4. Deploy.
+# 4. Stage the license and issue TLS (see "TLS certificates" below —
+#    ELEVEN separate certificates, not one multi-SAN).
+cp <issued>.license.json ../.secrets/license.json
+
+# 5. Deploy.
 ./install.sh --env=prod
 ./check.sh
+```
+
+### TLS certificates — eleven lineages, not one
+
+`default.conf.template` points every `server` block at its **own**
+certificate directory (`/etc/letsencrypt/live/cloud.${DOMAIN}/`,
+`/live/api.${DOMAIN}/`, …). A single `certbot certonly` with a long list
+of `-d` produces **one** lineage named after the first `-d`, and nginx
+then fails to start on the other ten. Issue them one per name; the apex
+takes `www` along with it:
+
+```bash
+D=<your-domain>; EMAIL=<a mailbox you actually read>
+certbot certonly --standalone --non-interactive --agree-tos --email "$EMAIL" \
+  --cert-name "$D" -d "$D" -d "www.$D"
+for s in cloud cpo cs admin driver pay auth api ws ocpp; do
+  certbot certonly --standalone --non-interactive --agree-tos --email "$EMAIL" \
+    --cert-name "$s.$D" -d "$s.$D"
+done
+cp -a /etc/letsencrypt <workspace>/.secrets/letsencrypt   # hooks/pre-install.sh picks it up
+```
+
+All eleven names must resolve to the host **before** certbot runs — there
+is no wildcard in the shipped config, and `hooks/pre-install.sh` bakes the
+tree into the nginx image at build time.
+
+Renewal is the nginx container's job (`certbot renew --webroot`, twice a
+day, with `nginx -s reload` as deploy-hook). **Disable the host's own
+`certbot.timer`** — issuing above leaves it enabled, and once the stack
+holds :80 a host-side standalone renewal fails silently every twelve
+hours until the certificate expires.
+
+### Pulling from a private registry
+
+Defaults are the public contour: platform images from GHCR, base images
+from Docker Hub. A brand mirroring images into its own registry sets four
+variables in `envs/<env>/.env.template` — `REGISTRY`, `BASE_REGISTRY`,
+`PGBOUNCER_IMAGE`, `PGWEB_IMAGE` (see `[R-0]` in `.env.template`) — and
+puts `REGISTRY_USER` / `REGISTRY_PASS` in `.secrets/<env>.env`.
+`install.sh` and `update.sh` then run `docker login` before `compose
+pull`; with the variables absent the step is skipped and nothing changes.
+
+Verify the switch before deploying — this must print `0`:
+
+```bash
+docker compose --env-file workdir/.env config | grep -cE 'ghcr\.io|docker\.io'
 ```
 
 One-liner for a fresh server (clones the repo, re-execs itself):
@@ -51,28 +103,49 @@ curl -fsSL https://raw.githubusercontent.com/<brand>/csms/main/install.sh | \
 ```
 <brand>/csms/
 ├── README.md                         Operator guide (this file, customise it)
+├── .gitignore                        Keeps workdir/, .secrets/, conf/ out of git
 ├── docker-compose.yaml               14 services, image-based
-├── .env.template                     131 variables — root defaults
+├── .env.template                     Root defaults, incl. [R-0] registry block
 ├── install.sh                        First-time deployment
 ├── update.sh                         Version bump + rolling restart
 ├── check.sh                          Health verification
+├── docker-*.sh                       up / down / logs / build helpers
+│
+├── .docker/                          Locally-built infra images
+│   ├── nginx-certbot/                Reverse proxy + TLS renewal loop
+│   │   ├── default.conf.template     Per-subdomain server blocks (envsubst $DOMAIN)
+│   │   ├── nginx.conf                resolver + $*_upstream maps
+│   │   └── entrypoint.sh             render config → certbot renew loop
+│   ├── pgbouncer/  pgweb/            Built; ARG-parameterised base image
+│   └── auth/ db-migrate/ postgres/ test-run/ wireguard/
+│                                     Not built by this compose — kept as the
+│                                     shared canonical home (postgres/postgresql.conf
+│                                     is referenced from compose as the tuning baseline)
 │
 ├── envs/
 │   ├── dev/
 │   │   ├── .env.template             Overrides root (DOMAIN=localhost, …)
 │   │   ├── platform.lock.json        Pinned PLATFORM_VERSION + refs
+│   │   ├── render.sh                 Renders envs/templates/** into workdir/
 │   │   ├── secrets/
 │   │   │   └── load-from-vault.sh    Writes secrets into workdir/.env
 │   │   └── hooks/
 │   │       └── (per-env pre/post-install/update.sh, if any)
 │   ├── stage/  (same structure)
-│   └── prod/   (same structure)
+│   ├── prod/   (same structure)
+│   └── templates/                    Sources for render.sh — app .env files
+│       ├── backend/db/sql/*.psql.template
+│       ├── frontend/{webapp,driver,pay}/
+│       └── landing/
 │
 ├── hooks/                            Global (all envs)
 │   ├── pre-install.sh
 │   ├── post-install.sh
 │   ├── pre-update.sh
 │   └── post-update.sh
+│
+├── conf/                             Gitignored — staged by hooks/pre-install.sh
+│                                     from .secrets/ (license.json, landing.env)
 │
 └── workdir/                          Gitignored — created by install.sh
     ├── .env                          Merged env (root + per-env + secrets)

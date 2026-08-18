@@ -1,0 +1,646 @@
+# nginx config — HTTPS with Let's Encrypt SSL
+#
+# Routing:
+#   cloud/cpo/driver/admin.${DOMAIN}     → frontend (Nuxt SPA) + backend API
+#   cs.${DOMAIN}                         → frontend + backend API + CS REST API (/cs-api/*, /cs-ws/*)
+#   auth.${DOMAIN}                       → auth container + backend API
+#   ocpp.${DOMAIN}                       → OCPP Central System
+
+# Rate limiting zones defined in nginx.conf (auth_token, auth_identifier)
+
+# Upstreams are resolved lazily via resolver 127.0.0.11 + map $host $*_upstream
+# (see nginx.conf). No static upstream{} blocks — they pin the IP at start and
+# break on container restart.
+
+# ─── HTTP → HTTPS redirect (ACME-safe) ──────────────────────────────────────
+#
+# Single :80 server. ACME challenge is served as plain HTTP via
+# /.well-known/acme-challenge/, all other traffic 301'd to HTTPS via
+# `location /` (NOT `if ($host = …) { return 301 …; }`, which executes in
+# the rewrite phase ahead of location matching and would intercept ACME
+# requests — breaking renewal at the worst possible moment, when the
+# cert just expired and HTTPS validation is no longer trusted).
+#
+# Source pattern: Let's Encrypt community FAQ + certbot upstream docs +
+# nginx-proxy/acme-companion (production reference).
+
+server {
+    listen 80;
+    listen [::]:80;
+
+    server_name
+        ${DOMAIN}
+        www.${DOMAIN}
+        admin.${DOMAIN}
+        api.${DOMAIN}
+        auth.${DOMAIN}
+        cloud.${DOMAIN}
+        cpo.${DOMAIN}
+        cs.${DOMAIN}
+        driver.${DOMAIN}
+        ocpp.${DOMAIN}
+        pay.${DOMAIN};
+
+    server_tokens off;
+
+    # ^~ locks priority above any `/` block and above the rewrite phase.
+    # Without ^~ the prefix match is still preferred over `location /`,
+    # but ^~ makes the intent explicit and skips regex location scanning.
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        try_files $uri =404;
+        default_type "text/plain";
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# ─── SSL defaults ────────────────────────────────────────────────────────────
+
+# Shared SSL settings (each server block references own cert)
+# include /etc/letsencrypt/options-ssl-nginx.conf + ssl_dhparam in each block
+
+# ─── cloud.${DOMAIN} ───────────────────────────────────────────────────
+
+server {
+    listen 443 ssl;
+
+    server_name cloud.${DOMAIN};
+
+    ssl_certificate /etc/letsencrypt/live/cloud.${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/cloud.${DOMAIN}/privkey.pem;
+
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    ssl_stapling off;
+
+    client_max_body_size 10m;
+
+    include /etc/nginx/includes/proxy-backend.conf;
+}
+
+# ─── pay.${DOMAIN} ───────────────────────────────────────────────────
+# Ad-hoc QR payment entry point (AFIR compliance).
+# Public, no auth. Only /charge/* routes to backend PGHTTP.
+# Everything else → minimal landing page or redirect.
+
+server {
+    listen 443 ssl;
+
+    server_name pay.${DOMAIN};
+
+    ssl_certificate /etc/letsencrypt/live/pay.${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/pay.${DOMAIN}/privkey.pem;
+
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    ssl_stapling off;
+
+    # REST API → backend (currently /api/v1/manifest for the attestation
+    # bootstrap; future hooks like cookie-auth would land here too).
+    location ^~ /api/ {
+        proxy_pass $backend_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Connection "close";
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # /charge/info/{uuid} → backend PGHTTP (GET connector info, called by frontend JS)
+    location ^~ /charge/info/ {
+        proxy_pass $backend_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Connection "close";
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+        limit_req zone=charge_status burst=30 nodelay;
+        limit_req_status 429;
+    }
+
+    # /charge/create/{uuid} → backend PGHTTP (POST create payment)
+    location ^~ /charge/create/ {
+        proxy_pass $backend_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Connection "close";
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+        limit_req zone=charge_create burst=20 nodelay;
+        limit_req_status 429;
+    }
+
+    # /charge/status/{id} → backend PGHTTP (polling for session status)
+    location ^~ /charge/status/ {
+        proxy_pass $backend_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Connection "close";
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+        limit_req zone=charge_status burst=60 nodelay;
+        limit_req_status 429;
+    }
+
+    # /charge/stop/{id} → backend PGHTTP (stop charging, requires Bearer)
+    location ^~ /charge/stop/ {
+        proxy_pass $backend_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Connection "close";
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+        limit_req zone=charge_create burst=20 nodelay;
+        limit_req_status 429;
+    }
+
+    # /charge/cancel/{id} → backend PGHTTP (cancel a not-yet-completed
+    # payment, requires the charge_secret; driver backing out of checkout)
+    location ^~ /charge/cancel/ {
+        proxy_pass $backend_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Connection "close";
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+        limit_req zone=charge_create burst=20 nodelay;
+        limit_req_status 429;
+    }
+
+    # /oauth2/token → backend AuthServer (service auth for WebSocket)
+    location ^~ /oauth2/ {
+        proxy_pass $backend_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Connection "close";
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+        limit_req zone=charge_create burst=3 nodelay;
+        limit_req_status 429;
+    }
+
+    # Stripe webhook → backend PGHTTP (preserves raw body + Stripe-Signature header)
+    location = /stripe/webhook {
+        proxy_pass $backend_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Connection "close";
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # Frontend pages (Nuxt pay app)
+    location / {
+        proxy_pass $pay_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Connection "close";
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
+
+# ─── api.${DOMAIN} ───────────────────────────────────────────────────
+
+server {
+    listen 443 ssl;
+
+    server_name api.${DOMAIN};
+
+    ssl_certificate /etc/letsencrypt/live/api.${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/api.${DOMAIN}/privkey.pem;
+
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    ssl_stapling off;
+
+    client_max_body_size 10m;
+
+    include /etc/nginx/includes/proxy-backend.conf;
+}
+
+# ─── cpo.${DOMAIN} ─────────────────────────────────────────────────────
+
+server {
+    listen 443 ssl;
+
+    server_name cpo.${DOMAIN};
+
+    ssl_certificate /etc/letsencrypt/live/cpo.${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/cpo.${DOMAIN}/privkey.pem;
+
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    ssl_stapling off;
+
+    client_max_body_size 10m;
+
+    include /etc/nginx/includes/proxy-backend.conf;
+}
+
+# ─── driver.${DOMAIN} ──────────────────────────────────────────────────
+# Driver PWA — full-featured mobile app for EV drivers.
+# Authenticated via OAuth2 (cookie-based), WebSocket via ws.${DOMAIN}.
+
+server {
+    listen 443 ssl;
+
+    server_name driver.${DOMAIN};
+
+    ssl_certificate /etc/letsencrypt/live/driver.${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/driver.${DOMAIN}/privkey.pem;
+
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    ssl_stapling off;
+
+    # REST API → backend
+    location ^~ /api/ {
+        proxy_pass $backend_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Connection "close";
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # OAuth2 → backend
+    location ^~ /oauth2/ {
+        proxy_pass $backend_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Connection "close";
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # Frontend (Nuxt driver app)
+    location / {
+        proxy_pass $driver_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Connection "close";
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
+
+# ─── admin.${DOMAIN} ───────────────────────────────────────────────────
+
+server {
+    listen 443 ssl;
+
+    server_name admin.${DOMAIN};
+
+    ssl_certificate /etc/letsencrypt/live/admin.${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/admin.${DOMAIN}/privkey.pem;
+
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    ssl_stapling off;
+
+    client_max_body_size 10m;
+
+    include /etc/nginx/includes/proxy-backend.conf;
+}
+
+# ─── cs.${DOMAIN} ──────────────────────────────────────────────────────
+# CS Web UI Pro — frontend + backend API + CS REST API proxy to OCPP service
+
+server {
+    listen 443 ssl;
+
+    server_name cs.${DOMAIN};
+
+    ssl_certificate /etc/letsencrypt/live/cs.${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/cs.${DOMAIN}/privkey.pem;
+
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    ssl_stapling off;
+
+    client_max_body_size 10m;
+
+    # CS REST API — proxy to OCPP Central System
+    location ^~ /cs-api/ {
+        rewrite ^/cs-api/(.*) /api/v1/$1 break;
+        proxy_pass $ocpp_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Connection "keep-alive";
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # CS WebSocket log — proxy to OCPP Central System
+    location ^~ /cs-ws/ {
+        rewrite ^/cs-ws/(.*) /ws/$1 break;
+        proxy_pass $ocpp_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_read_timeout 86400;
+    }
+
+    # All other locations — same as other app subdomains
+    include /etc/nginx/includes/proxy-backend.conf;
+}
+
+# ─── ocpp.${DOMAIN} ────────────────────────────────────────────────────
+# OCPP Central System (WebSocket + REST API)
+
+server {
+    listen 443 ssl;
+
+    server_name ocpp.${DOMAIN};
+
+    ssl_certificate /etc/letsencrypt/live/ocpp.${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/ocpp.${DOMAIN}/privkey.pem;
+
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    ssl_stapling off;
+
+    access_log /var/log/nginx/ocpp_access.log;
+    error_log  /var/log/nginx/ocpp_error.log;
+
+    client_max_body_size       10m;
+    client_body_buffer_size    128k;
+    proxy_connect_timeout      70;
+    proxy_send_timeout         90;
+    proxy_read_timeout         90;
+    proxy_buffering            on;
+    proxy_buffer_size          4k;
+    proxy_buffers              4 32k;
+    proxy_busy_buffers_size    64k;
+    proxy_temp_file_write_size 64k;
+
+    location ^~ /ocpp/ {
+        proxy_pass $ocpp_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_read_timeout 86400;
+    }
+
+    location / {
+        proxy_pass $ocpp_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Connection "keep-alive";
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
+
+# ─── auth.${DOMAIN} ────────────────────────────────────────────────────
+# OAuth2 Auth App (standalone Vue SPA)
+
+server {
+    listen 443 ssl;
+
+    server_name auth.${DOMAIN};
+
+    ssl_certificate /etc/letsencrypt/live/auth.${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/auth.${DOMAIN}/privkey.pem;
+
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    ssl_stapling off;
+
+    client_max_body_size 1m;
+
+    location = /oauth2/token {
+        limit_req zone=auth_token burst=5 nodelay;
+        limit_req_status 429;
+
+        proxy_pass $backend_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Origin "https://$host";
+        proxy_set_header Connection "keep-alive";
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    location = /oauth2/identifier {
+        limit_req zone=auth_identifier burst=5 nodelay;
+        limit_req_status 429;
+
+        proxy_pass $backend_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Origin "https://$host";
+        proxy_set_header Connection "keep-alive";
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    location ^~ /oauth2/ {
+        proxy_pass $backend_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Origin "https://$host";
+        proxy_set_header Connection "keep-alive";
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    location ^~ /api/ {
+        proxy_pass $backend_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Origin "https://$host";
+        proxy_set_header Connection "keep-alive";
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    location / {
+        proxy_pass $auth_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        add_header X-Frame-Options "DENY" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    }
+}
+
+# ─── ${DOMAIN} ─────────────────────────────────────────────────
+
+server {
+    listen 443 ssl;
+
+    server_name ${DOMAIN} www.${DOMAIN};
+
+    ssl_certificate /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    ssl_stapling off;
+
+    # Landing-conditional: если landing-сервиса в compose нет, variable-based
+    # proxy_pass на $landing_upstream не зарезолвится → nginx отдаст
+    # 502/503/504. Перехватываем и редиректим на cloud-SPA, чтобы bare
+    # DOMAIN всегда был «живой».
+    #
+    # Бренду без собственного лендинга (сервис закомментирован в compose)
+    # этот fallback и работает штатным путём. Но резолв на несуществующий
+    # upstream стоит одного неудачного DNS-запроса на КАЖДЫЙ запрос к
+    # апексу — если лендинга не будет никогда, дешевле заменить весь
+    # `location /` на прямой `return 301 https://cloud.${DOMAIN}$request_uri;`.
+    location / {
+        proxy_pass $landing_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Connection "keep-alive";
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_intercept_errors on;
+        error_page 502 503 504 = @no_landing;
+    }
+
+    location @no_landing {
+        return 301 https://cloud.${DOMAIN}$request_uri;
+    }
+}
+
+# ─── ws.${DOMAIN} ─────────────────────────────────────────────────
+
+server {
+    listen 80;
+    listen [::]:80;
+    listen 443 ssl;
+
+    server_name ws.${DOMAIN};
+
+    access_log  /var/log/nginx/ws_access.log;
+    error_log   /var/log/nginx/ws_error.log;
+
+    # This block owns :80 for ws.${DOMAIN} (plain ws:// for OCPP stations
+    # that don't support TLS), so unlike the other subdomains it does NOT
+    # fall through to the shared ACME :80 server above — that block's
+    # server_name list doesn't include ws.${DOMAIN}, and nginx routes by
+    # exact server_name match. Without this location, certbot's HTTP-01
+    # webroot challenge hits `location /` below and gets proxied to the
+    # backend instead of served from disk — renewal fails every time,
+    # eventually triggering Let's Encrypt's failed-authorization rate limit.
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        try_files $uri =404;
+        default_type "text/plain";
+    }
+
+    ssl_certificate /etc/letsencrypt/live/ws.${DOMAIN}/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/ws.${DOMAIN}/privkey.pem; # managed by Certbot
+
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    ssl_stapling off;
+
+    client_max_body_size       10m;
+    client_body_buffer_size    128k;
+
+    client_body_temp_path      /var/nginx/client_body_temp;
+
+    proxy_connect_timeout      70;
+    proxy_send_timeout         90;
+    proxy_read_timeout         90;
+
+    proxy_buffering            on;
+    proxy_buffer_size          4k;
+    proxy_buffers              4 32k;
+    proxy_busy_buffers_size    64k;
+    proxy_temp_file_write_size 64k;
+
+    proxy_temp_path            /var/nginx/proxy_temp;
+
+    location ^~ /session/ {
+        proxy_pass $backend_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 86400;
+    }
+
+    location ^~ /ocpp/ {
+        proxy_pass $ocpp_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 86400;
+    }
+
+    location / {
+        proxy_pass $backend_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 86400;
+    }
+
+}

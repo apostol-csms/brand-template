@@ -203,9 +203,37 @@ reload_secrets() {
   fi
 }
 
-# ─── Step 5: Pull platform images ────────────────────────────────────
+# ─── Step 5: Registry login + pull platform images ───────────────────
+
+# ─── Вход в реестр образов ───────────────────────────────────────────
+#
+# Нужен, когда REGISTRY указывает на приватный реестр (например,
+# собственное зеркало бренда). Для публичного ghcr.io шаг пропускается:
+# переменные не заданы — логина нет, поведение прежнее.
+#
+# Значения читаются из workdir/.env, а не из окружения скрипта: их кладёт
+# туда envs/<env>/secrets/load-from-vault.sh по префиксу REGISTRY_, и в
+# committed-шаблонах учётных данных быть не должно.
+env_get() {
+  [[ -r "$WORKDIR/.env" ]] || return 0
+  sed -n "s/^$1=//p" "$WORKDIR/.env" | tail -1 | sed -e 's/^"//' -e 's/"$//'
+}
+
+registry_login() {
+  local RU RP HOST
+  RU="$(env_get REGISTRY_USER)"; RP="$(env_get REGISTRY_PASS)"
+  if [[ -z "$RU" || -z "$RP" ]]; then
+    log "registry login: skipped (REGISTRY_USER/REGISTRY_PASS not set)"
+    return 0
+  fi
+  HOST="$(env_get REGISTRY)"; HOST="${HOST:-ghcr.io}"
+  HOST="${HOST%%/*}"          # registry.example.ru/base → registry.example.ru
+  log "registry login: $HOST as $RU"
+  printf '%s' "$RP" | docker login "$HOST" -u "$RU" --password-stdin
+}
 
 pull_images() {
+  registry_login
   log "pull all platform images for $PLATFORM_VERSION (Phase 10)"
   # `compose pull` reads images from compose itself — picks up
   # PLATFORM_VERSION from workdir/.env automatically and skips the

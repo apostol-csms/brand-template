@@ -1,4 +1,7 @@
-FROM edoburu/pgbouncer:latest
+# Плавающий тег upstream'а. Зеркалирующий бренд фиксирует его датой
+# и подставляет полную ссылку через PGBOUNCER_IMAGE.
+ARG PGBOUNCER_IMAGE=edoburu/pgbouncer:latest
+FROM ${PGBOUNCER_IMAGE}
 
 USER root
 
