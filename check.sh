@@ -84,14 +84,38 @@ record() {
   esac
 }
 
+# Load workdir/.env WITHOUT `source`.
+#
+# .env is a data format, not a script, and must not be executed: it holds
+# every database role password plus the OAuth2 secrets, and brand artwork
+# arrives as an inline `data:image/svg+xml;base64,…` URI whose semicolon
+# splits the line into two commands. Parse it line by line, no evaluation.
+# Same parser as envs/*/render.sh.
+load_env() {
+  local line key val
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    [[ "$line" != *=* ]] && continue
+    key="${line%%=*}"
+    val="${line#*=}"
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    if [[ ${#val} -ge 2 ]]; then
+      case "$val" in
+        \"*\") val="${val:1:${#val}-2}" ;;
+        \'*\') val="${val:1:${#val}-2}" ;;
+      esac
+    fi
+    export "$key=$val"
+  done < "$1"
+}
+
 # ─── Load env ────────────────────────────────────────────────────────
 
 if [[ ! -f "$WORKDIR/.env" ]]; then
   record bootstrap fail "workdir/.env missing — has install.sh run?"
   OVERALL=2
 else
-  # shellcheck disable=SC1091
-  set -a; source "$WORKDIR/.env"; set +a
+  load_env "$WORKDIR/.env"
 fi
 
 DOMAIN="${DOMAIN:-localhost}"
