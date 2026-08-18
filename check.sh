@@ -20,11 +20,11 @@
 #   [version]     workdir/.installed-version matches docker image tag
 #
 # --local mode: api/openid/frontend probes connect to 127.0.0.1:443 with
-# `--resolve <host>:443:127.0.0.1` (so Host header + SNI стой правильные,
-# а TCP идёт на loopback). TLS check тоже свитчает openssl s_client на
-# 127.0.0.1:443 с сохранением -servername. Нужно на VPS без hairpin NAT
-# (хост не достучивается до собственного публичного IP) — типичный кейс
-# дешёвых RU-провайдеров. По умолчанию выключено.
+# `--resolve <host>:443:127.0.0.1` — Host header and SNI stay correct
+# while the TCP connection goes to loopback. The TLS check likewise
+# points openssl s_client at 127.0.0.1:443 while keeping -servername.
+# Needed on a VPS without hairpin NAT, where the host cannot reach its
+# own public IP — common with cheap providers. Off by default.
 #
 # Exit codes: 0 = all ok, 1 = at least one warn, 2 = at least one fail.
 

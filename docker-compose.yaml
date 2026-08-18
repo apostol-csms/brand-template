@@ -472,9 +472,9 @@ services:
     networks:
       - lan-network
     env_file:
-      # required:false — conf/ создаётся hooks/pre-install.sh из .secrets/
-      # и в репозитории отсутствует. Без этого флага свежий клон шаблона
-      # не проходит даже `docker compose config`.
+      # required:false — conf/ is staged by hooks/pre-install.sh from
+      # .secrets/ and is absent from the repository. Without the flag a
+      # fresh clone of the template fails even `docker compose config`.
       - path: ./conf/landing.env
         required: false
     healthcheck: *spa-healthcheck

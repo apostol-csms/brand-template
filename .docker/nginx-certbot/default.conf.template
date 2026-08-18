@@ -529,16 +529,17 @@ server {
 
     ssl_stapling off;
 
-    # Landing-conditional: если landing-сервиса в compose нет, variable-based
-    # proxy_pass на $landing_upstream не зарезолвится → nginx отдаст
-    # 502/503/504. Перехватываем и редиректим на cloud-SPA, чтобы bare
-    # DOMAIN всегда был «живой».
+    # Landing-conditional: with no landing service in compose, the
+    # variable-based proxy_pass to $landing_upstream fails to resolve and
+    # nginx answers 502/503/504. Intercept that and redirect to the cloud
+    # SPA, so the bare DOMAIN is always alive.
     #
-    # Бренду без собственного лендинга (сервис закомментирован в compose)
-    # этот fallback и работает штатным путём. Но резолв на несуществующий
-    # upstream стоит одного неудачного DNS-запроса на КАЖДЫЙ запрос к
-    # апексу — если лендинга не будет никогда, дешевле заменить весь
-    # `location /` на прямой `return 301 https://cloud.${DOMAIN}$request_uri;`.
+    # For a brand with no landing site of its own (service commented out
+    # in compose) this fallback IS the normal path. But resolving a
+    # non-existent upstream costs one failed DNS lookup on EVERY request
+    # to the apex — if a landing site is never coming, replace the whole
+    # `location /` with a plain
+    # `return 301 https://cloud.${DOMAIN}$request_uri;` instead.
     location / {
         proxy_pass $landing_upstream;
         proxy_http_version 1.1;

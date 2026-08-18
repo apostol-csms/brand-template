@@ -504,15 +504,15 @@ clone_sources() {
 
 # ─── Step 8: Registry login + pull images ────────────────────────────
 
-# ─── Вход в реестр образов ───────────────────────────────────────────
+# ─── Image registry login ────────────────────────────────────────────
 #
-# Нужен, когда REGISTRY указывает на приватный реестр (например,
-# собственное зеркало бренда). Для публичного ghcr.io шаг пропускается:
-# переменные не заданы — логина нет, поведение прежнее.
+# Needed when REGISTRY points at a private registry — a brand's own
+# mirror, typically. For the public ghcr.io the step is skipped: with the
+# variables unset there is no login and nothing changes.
 #
-# Значения читаются из workdir/.env, а не из окружения скрипта: их кладёт
-# туда envs/<env>/secrets/load-from-vault.sh по префиксу REGISTRY_, и в
-# committed-шаблонах учётных данных быть не должно.
+# Values are read from workdir/.env rather than the script environment:
+# envs/<env>/secrets/load-from-vault.sh puts them there via the REGISTRY_
+# prefix, and credentials must never sit in a committed template.
 env_get() {
   [[ -r "$WORKDIR/.env" ]] || return 0
   sed -n "s/^$1=//p" "$WORKDIR/.env" | tail -1 | sed -e 's/^"//' -e 's/"$//'

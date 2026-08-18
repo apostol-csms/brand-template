@@ -1,9 +1,10 @@
 # Gitignored paths — DO NOT commit.
 #
-# ⚠️ Этого файла в шаблоне долго не было вовсе. Бренд, склонированный без
-# него, коммитит workdir/ — а там лежит слитый .env со ВСЕМИ паролями
-# ролей БД, OAuth2-секретами и ключами платёжного провайдера. Плюс
-# .secrets/, conf/license.json и credential.helper. Не удаляйте.
+# ⚠️ This file was missing from the template for a long time. A brand
+# cloned without it commits workdir/ — which holds the merged .env with
+# EVERY database role password, the OAuth2 secrets and the payment
+# provider keys. Plus .secrets/, conf/license.json and credential.helper.
+# Do not remove it.
 
 # install.sh creates this; contains merged .env with secrets + cloned
 # platform sources. The whole tree is stateful and host-specific.

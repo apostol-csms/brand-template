@@ -16,20 +16,21 @@ set -euo pipefail
 
 TEMPLATES_DIR="$SCRIPT_DIR/envs/templates"
 
-# Загрузка workdir/.env БЕЗ `source`.
+# Load workdir/.env WITHOUT `source`.
 #
-# Здесь стояло `set -a; source "$WORKDIR/.env"; set +a`, и это работало
-# ровно до первого значения с точкой с запятой. Брендовый знак приезжает
-# инлайновым data:-URI:
+# This used to be `set -a; source "$WORKDIR/.env"; set +a`, which worked
+# right up to the first value containing a semicolon. Brand artwork
+# arrives as an inline data: URI:
 #
 #   BRANDING_MARK=data:image/svg+xml;base64,PHN2…
 #
-# bash разбирает такую строку как ДВЕ команды — `data:image/svg+xml` и
-# `base64,PHN2…` — и вторая уходит в «command not found», exit 127. При
-# `set -euo pipefail` это обрывает и install.sh, и update.sh на шаге
-# render_app_env. Кавычки в шаблоне спасли бы от этого случая, но не от
-# следующего: .env — формат данных, а не скрипт, и исполнять его нельзя
-# в принципе. Разбираем построчно, без вычисления.
+# bash reads that as TWO commands — `data:image/svg+xml` and
+# `base64,PHN2…` — and the second one exits 127, command not found. Under
+# `set -euo pipefail` that aborts both install.sh and update.sh at the
+# render_app_env step. Quoting the value would fix this one case but not
+# the next: .env is a data format, not a script, and must not be executed
+# at all — it holds every database role password and the OAuth2 secrets.
+# Parse it line by line instead, with no evaluation.
 load_env() {
   local line key val
   while IFS= read -r line || [[ -n "$line" ]]; do
@@ -37,9 +38,9 @@ load_env() {
     [[ "$line" != *=* ]] && continue
     key="${line%%=*}"
     val="${line#*=}"
-    # Имя переменной должно быть именем переменной, иначе строка не наша.
+    # A variable name must look like one, otherwise the line is not ours.
     [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
-    # Снять обрамляющие кавычки, если они есть.
+    # Strip surrounding quotes if present.
     if [[ ${#val} -ge 2 ]]; then
       case "$val" in
         \"*\") val="${val:1:${#val}-2}" ;;
