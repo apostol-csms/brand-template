@@ -19,6 +19,11 @@ ghcr.io/apostol-csms/      │  │   ├── platform.lock.json
 
 ## Quick start
 
+The condensed path. For a first brand, or when something needs to be
+right the first time, read **"Standing up a new brand — full
+walkthrough"** below instead: it covers the steps that have to happen
+*before* `install.sh` and the order they go in.
+
 ```bash
 # 1. Create a brand repo from this template (GitHub CLI).
 gh repo create <brand>/csms --template apostol-csms/brand-template --private --clone
@@ -97,6 +102,184 @@ curl -fsSL https://raw.githubusercontent.com/<brand>/csms/main/install.sh | \
   BRAND_REPO_URL=https://github.com/<brand>/csms \
   bash
 ```
+
+## Standing up a new brand — full walkthrough
+
+Written after doing it for real. The order matters: several steps have to
+happen before `install.sh` runs, and finding that out afterwards costs a
+teardown.
+
+### 0. Decide the identity first
+
+Four values, and they are awkward to change later:
+
+| | |
+|---|---|
+| **Brand code** | lowercase, `^[a-z0-9][a-z0-9-]*$`, ≤32 chars. Becomes `PROJECT_NAME`, the compose project, the volume prefix (`<code>_postgresql`), the OAuth2 audience and the vault filename. Keep it short and distinct from other brands' codes. |
+| **Display name** | what users see. Comes from the license, not from env — the frontends read it through the signed manifest. |
+| **Domain** | the deploy domain. It may differ from the brand's marketing domain (PlugMe is `plugme.ru` as a brand and `plugme.space` as a deployment) — the license carries the deploy one. |
+| **Database name** | `PGDATABASE`. Not the same string as the config folder `csms`; pick something short, it ends up in every connection. |
+
+### 1. Issue the license
+
+Nothing starts without it: `backend` refuses to boot with "License
+unavailable", and `csms-db` decrypts its SQL through the license's
+`csms_db_stanza`.
+
+```bash
+cd <workspace>/tools/platform-tools
+$EDITOR brands/<code>.payload.json      # copy an existing one, 11 fields
+./brands/reissue.sh <code> --workspace <workspace>/brands
+```
+
+- `iat` and `jti` are stamped by the issuer — never edit them by hand.
+- `exp` is the one field the operator sets. A permanent brand gets
+  `9999999999`; anything time-boxed (a demo, a trial, an audit stand)
+  gets a real timestamp.
+- `--workspace` matters: the default still points at the pre-2026-05
+  layout, and without it the script silently skips staging the license.
+- Validate before shipping it anywhere:
+
+```bash
+./venv/bin/python bin/csms-license-issue validate ~/csms-vault/issued/<code>.license.json \
+    --pub ~/csms-vault/platform-pub.pem --cek-file ~/csms-vault/csms-db.cek
+```
+
+A release does **not** invalidate a license — the CEK is platform-stable.
+Re-issue only on renewal, identity change, or limit change.
+
+### 2. Create the repo and the workspace
+
+```bash
+gh repo create <org>/csms --template apostol-csms/brand-template --private
+mkdir -p <workspace>/brands/<code> && cd $_
+git clone git@github.com:<org>/csms.git
+mkdir .secrets && chmod 700 .secrets
+cp ~/csms-vault/issued/<code>.license.json .secrets/license.json && chmod 600 $_
+```
+
+The brand workspace (`brands/<code>/`) is **not** a git repo — the repos
+live one level deeper. `.secrets/` sits beside `csms/`, never inside it.
+
+### 3. DNS — eleven names, before anything else
+
+There is no wildcard in the shipped nginx config. Point all of these at
+the host and wait for propagation **before** issuing certificates:
+
+```
+<domain>  www  cloud  cpo  cs  admin  driver  pay  auth  api  ws  ocpp
+```
+
+`ws` and `ocpp` are the two that get forgotten, and each is a separate
+failure a long way downstream — websockets dead, stations unable to
+connect.
+
+### 4. Prepare the host
+
+```bash
+# Docker from the official repository (get.docker.com works too;
+# hooks/bootstrap-host.sh uses it if you prefer a one-liner).
+# Then, three things that are easy to skip and unpleasant to debug:
+
+# a) log limits — /etc/docker/daemon.json often does not exist at all
+{"log-driver":"json-file","log-opts":{"max-size":"50m","max-file":"3"}}
+
+# b) time sync — the manifest envelope rejects clock skew over 300s,
+#    and a fresh minimal image may have no NTP service installed
+timedatectl show -p NTPSynchronized --value    # must be "yes"
+
+# c) after issuing certificates in step 5, disable the host certbot timer
+systemctl disable --now certbot.timer
+```
+
+That last one is not optional. Renewal belongs to the nginx container;
+the host timer, left enabled, tries a standalone renewal every twelve
+hours, finds :80 taken, and fails silently until the certificate expires.
+
+Check RAM against the brand's profile — the stack runs on 3 GB, but
+`PG_*` tuning must match the host. Never copy a PostgreSQL profile from
+another brand: a 12 GB `shared_buffers` from a large server stops
+PostgreSQL from starting on a small one.
+
+### 5. TLS — see "TLS certificates" above
+
+Issue eleven lineages, then pull the tree into the workspace so
+`hooks/pre-install.sh` can bake it into the nginx image:
+
+```bash
+scp -r root@host:/etc/letsencrypt <workspace>/brands/<code>/.secrets/letsencrypt
+```
+
+Use `tar` over ssh rather than `scp -r` if you want the `live/ →
+archive/` symlinks and the 600 modes preserved — and you do.
+
+### 6. Customise the repo
+
+| File | What to change |
+|---|---|
+| `envs/<env>/.env.template` | `PROJECT_NAME`, `DOMAIN`, `PGDATABASE`, the `PROJECT_*` block, `COMPANY_*`, payment and map provider, SMTP, `WS_HOST`, `PG_*` profile |
+| `envs/<env>/platform.lock.json` | `platform_version` + image digests |
+| `envs/templates/backend/db/sql/.env.key.psql.template` | trim the superset to your market's provider |
+| `.env.template` `[R-0]` | only if you mirror images into your own registry |
+| `docker-compose.yaml` | remove services the brand does not have — `landing` if there is no marketing site, `stripe-cli` outside development |
+
+Drop the deploy launcher next to the others: copy `brands/plugme.sh`
+(the pure registry consumer) and set `ARC_NAME`, `SSH_HOST`, `ENV`, and
+`PREVIEW_DOMAIN_FALLBACK` when the domain is not `<code>.com`.
+
+### 7. Secrets
+
+Create `brands/<code>/.secrets/<env>.env`. Generate **independent**
+passwords per role — `openssl rand -hex 24` each, not one value reused.
+The mandatory list is in `envs/<env>/secrets/load-from-vault.sh`; add
+`REGISTRY_USER` / `REGISTRY_PASS` if the registry is private.
+
+### 8. Preview, then install
+
+```bash
+./brands/<code>.sh --preview          # read-only: docker, RAM, ports, DNS, license, TLS
+./brands/<code>.sh --install --env=<env>
+```
+
+`--preview` is worth the extra round trip: it checks every precondition
+above and reports what would block the install, without touching
+anything.
+
+### 9. Verify
+
+```bash
+ssh <host> 'cd /opt/<code>/csms && ./check.sh'        # expect: all green
+curl -s https://api.<domain>/api/v1/license/status | jq .
+curl -s https://api.<domain>/api/v1/manifest | grep -c "<some other brand>"   # expect 0
+```
+
+If the host sits behind NAT without hairpin — common with cheap
+providers — `check.sh` reports `→ 000` for everything while the stack is
+perfectly healthy. Run it with `--local`.
+
+### Pitfalls worth knowing in advance
+
+- **A brand-new install is not the same code path as an update.** Live
+  brands are installed once and updated forever, so install-only defects
+  survive for months. If you find something odd, check whether an
+  `update.sh` run makes it disappear — that tells you which of the two
+  paths is broken.
+- **Do not copy another brand's artwork.** `BRANDING_MARK` and the logo
+  variables are what every frontend falls back to; a mark left in from a
+  copied brand ships silently into the new deployment.
+- **Independent role passwords are correct**, and were historically rare
+  — every existing brand happens to use the same value for
+  `POSTGRES_PASSWORD` and `DB_PASS_KERNEL`. Platform images older than
+  the fix have a `db-migrate` guard that only works when those two match:
+  it authenticates as `kernel` with the superuser password, swallows the
+  error, prints "database does not exist" and exits **0**, so `update.sh`
+  reports success having applied nothing. If your `db-migrate` logs say
+  that while the database plainly exists, this is what you are looking
+  at.
+- **Russian emails arriving in Slovak** means the same vintage of image:
+  the `cs`/`sk` locales were created after the i18n catalogue was loaded,
+  so those strings landed on the `ru` row. A single `db-migrate` run
+  repairs the data — provided the guard above is not swallowing it.
 
 ## Repository layout
 
@@ -373,11 +556,17 @@ Pre-release tags (`vX.Y.Z-alpha`, `-rc1`, `-beta`) are **not** tagged `:latest` 
 
 ### `install.sh` fails at "load secrets"
 
-```
-[install] ERROR: envs/dev/secrets/load-from-vault.sh is a stub.
-```
+The shipped `envs/<env>/secrets/load-from-vault.sh` is a working
+multi-provider dispatcher, not a stub — it auto-detects `file` / `env` /
+`vault` / `aws-sm`. A failure here usually means none of them matched:
+no `.secrets/<env>.env`, no exported passwords, no `VAULT_ADDR`, no
+`AWS_REGION`. Force the provider explicitly with
+`BRAND_SECRETS_PROVIDER=file` to see which step gives up.
 
-The stub must be replaced with real logic — see "Secrets setup" above. It cannot succeed until you open the file and implement the secret-loading path for your vault of choice.
+(Older brand repos may still carry the 120-line stub version of this
+file, which fails by design until implemented. Compare against this
+template if the script you have is short and full of commented-out
+`upsert_var` lines.)
 
 ### `install.sh` fails with `CHANGE_ME`
 
