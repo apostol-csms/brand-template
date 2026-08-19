@@ -467,7 +467,12 @@ services:
   # See docs/plans/2026-05-04-landing-cd-pipeline-design.md.
   landing:
     image: ghcr.io/${BRAND_GITHUB_ORG:-${PROJECT_NAME}}/landing:latest
-    pull_policy: always
+    # No implicit pull. The tag floats, so `pull_policy: always` would let an
+    # unrelated `compose up` replace a running service with whatever was last
+    # published to a registry abroad — an update nobody here decided to make.
+    # The CD pipeline is unaffected: it pulls explicitly (`compose pull landing`)
+    # before recreating, and an explicit pull ignores this policy.
+    pull_policy: missing
     container_name: landing
     networks:
       - lan-network
@@ -540,7 +545,10 @@ services:
   # software registry filing.
   ai-service:
     image: ${REGISTRY:-ghcr.io/apostol-csms}/csms-ai-service:${PLATFORM_VERSION:-latest}
-    pull_policy: always
+    # No implicit pull: the tag is pinned to PLATFORM_VERSION, so re-pulling it
+    # on every `up` fetched the same digest and only added a call to a registry
+    # abroad. Version changes come from platform.lock.json via update.sh.
+    pull_policy: missing
     container_name: ai-service
     networks:
       - lan-network
