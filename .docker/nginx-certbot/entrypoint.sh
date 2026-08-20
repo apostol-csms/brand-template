@@ -18,6 +18,11 @@ envsubst '$DOMAIN' \
 # --webroot + --webroot-path force webroot regardless of how the
 # certificate was originally obtained (--standalone, --nginx, --webroot —
 # any of them).
+# --installer null disables the installer step: certificates migrated
+#   from the old server carry `installer = nginx` in renewal/*.conf, and
+#   without this flag certbot would run the nginx plugin installer after a
+#   successful renewal and clobber our hand-written default.conf. The
+#   --deploy-hook "nginx -s reload" takes its place.
 # --non-interactive — never hang on a prompt.
 # --deploy-hook — reload nginx ONLY when a certificate actually renewed,
 #   not every 12 hours for nothing.
@@ -26,6 +31,7 @@ envsubst '$DOMAIN' \
 while true; do
   certbot renew \
     --webroot --webroot-path /var/www/certbot \
+    --installer null \
     --non-interactive \
     --deploy-hook "nginx -s reload" \
     --no-random-sleep-on-renew
