@@ -209,7 +209,7 @@ OPTIONAL=(
   # AI support agent — only consumed when the `ai` compose profile is on.
   # Which of these matters depends on LLM_PROVIDER; the rest stay empty.
   LLM_PROVIDER
-  OPENAI_API_KEY ANTHROPIC_API_KEY
+  OPENAI_API_KEY ANTHROPIC_API_KEY PERPLEXITY_API_KEY
   YANDEX_API_KEY YANDEX_FOLDER_ID GIGACHAT_API_KEY
   BRAND_GIT_TOKEN
   CURRENT_KEY
