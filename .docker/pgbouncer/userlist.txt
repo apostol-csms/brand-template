@@ -1,11 +1,1 @@
-; PLACEHOLDER — regenerated at install time from postgres pg_authid.
-; Real format: "<role>" "SCRAM-SHA-256$..." (one line per role).
-; Operator workflow:
-;   1. docker compose up -d postgres
-;   2. compose up db-init  (creates roles with SCRAM-SHA-256 passwords)
-;   3. .docker/pgbouncer/generate-userlist.sh (queries pg_authid, overwrites this file)
-;   4. compose restart pgbouncer  (re-reads userlist)
-; Until this is auto-wired into install.sh's post-db-init step, brands
-; can run step 3 manually after first boot.  Backend / ocpp connect to
-; postgres directly via db-network, so pgbouncer is non-critical for
-; the compose stack to come up.
+"pgbouncer" "PLACEHOLDER-overwritten-at-runtime-from-DB_PASS_PGBOUNCER"

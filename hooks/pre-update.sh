@@ -45,3 +45,58 @@ if [[ -f "$PARENT/.secrets/license.json" ]]; then
   cp "$PARENT/.secrets/license.json" "$CONF_DIR/license.json"
   chmod 600 "$CONF_DIR/license.json"
 fi
+
+# ─── pgbouncer auth role ─────────────────────────────────────────────
+#
+# Runs BEFORE the rolling restart, and that is the whole point. From this
+# version pgbouncer authenticates through auth_query (see
+# .docker/pgbouncer/pgbouncer.ini.template) and needs a `pgbouncer` role plus
+# the public.pgbouncer_get_auth function in the database. On a fresh install
+# both are created by db/sql/pgbouncer.psql; an update never re-runs
+# kernel.psql, so on an existing deployment they have to be created here.
+#
+# Without this the new pgbouncer starts against a database that has no such
+# role, auth_query fails, and EVERY connection is rejected — the whole stack
+# goes down. Aborting the update instead is the cheaper outcome.
+
+: "${WORKDIR:?WORKDIR required}"
+COMPOSE="docker compose --env-file $WORKDIR/.env"
+
+# shellcheck disable=SC1090
+set -a; . "$WORKDIR/.env"; set +a
+
+if [[ -z "${DB_PASS_PGBOUNCER:-}" ]]; then
+    echo "hook/pre-update: DB_PASS_PGBOUNCER is not set in $WORKDIR/.env." >&2
+    echo "hook/pre-update: add it (any strong value) and re-run; pgbouncer" >&2
+    echo "hook/pre-update: cannot authenticate without it." >&2
+    exit 1
+fi
+
+echo "hook/pre-update: ensuring pgbouncer auth role"
+# Пароль передаётся psql-переменной: :'pgbpass' экранируется самим psql.
+# Подстановка значения прямо в текст SQL сломалась бы на кавычке в пароле.
+$COMPOSE exec -T postgres psql -v ON_ERROR_STOP=1 -U postgres \
+    -d "${PGDATABASE:-csms}" -v pgbpass="$DB_PASS_PGBOUNCER" <<SQL
+DO \$\$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'pgbouncer') THEN
+    EXECUTE format('CREATE ROLE pgbouncer LOGIN PASSWORD %L', :'pgbpass');
+  ELSE
+    EXECUTE format('ALTER ROLE pgbouncer LOGIN PASSWORD %L', :'pgbpass');
+  END IF;
+END
+\$\$;
+
+CREATE OR REPLACE FUNCTION public.pgbouncer_get_auth (pUsername text)
+RETURNS TABLE (usename text, passwd text) AS \$\$
+  SELECT usename::text, passwd::text FROM pg_catalog.pg_shadow WHERE usename = pUsername;
+\$\$ LANGUAGE SQL SECURITY DEFINER STABLE SET search_path = pg_catalog, pg_temp;
+
+REVOKE ALL ON FUNCTION public.pgbouncer_get_auth(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.pgbouncer_get_auth(text) TO pgbouncer;
+GRANT CONNECT ON DATABASE "${PGDATABASE:-csms}" TO pgbouncer;
+SQL
+
+echo "hook/pre-update: pgbouncer auth role ready"
+
+exit 0

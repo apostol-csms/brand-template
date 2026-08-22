@@ -31,57 +31,18 @@ set -euo pipefail
 
 SCRIPT_DIR="$(dirname "$WORKDIR")"      # brand-repo root
 
-# ─── Regenerate pgbouncer userlist.txt from pg_authid ───────────────
+# ─── pgbouncer userlist ──────────────────────────────────────────────
 #
-# The csms-db image's entrypoint-secrets.sh (Phase 4) writes random
-# (or operator-supplied via DB_PASS_*) SCRAM-SHA-256 passwords into
-# postgres role definitions during db-init.  pgbouncer needs an
-# exact-match userlist.txt to authenticate runtime connections.
+# Nothing to do here any more. userlist.txt used to be rebuilt from
+# pg_authid, i.e. from the SCRAM verifiers of every application role.
+# A verifier authenticates a client but cannot be used to log into the
+# server — «server login failed: wrong password type» — which is what
+# broke once postgres switched to scram-sha-256 by default.
 #
-# Strategy:
-#   1. Query pg_authid for the SCRAM-SHA-256 hash strings of the 5
-#      runtime-app roles (kernel/admin/daemon/apibot/ocpp).  Returned
-#      as already-formatted pgbouncer lines.
-#   2. Write to workdir/pgbouncer/userlist.txt — the path bind-mounted
-#      RO into the pgbouncer container at /etc/pgbouncer/userlist.txt
-#      (overrides the placeholder baked into the image at build time).
-#   3. Restart pgbouncer to re-read the file.
-#
-# Idempotent: re-running the hook just re-queries pg_authid and
-# rewrites the file (passwords don't change unless csms-secrets volume
-# is destroyed + reinitialised).
+# pgbouncer now authenticates through auth_query and keeps a single
+# line of its own: the password of the `pgbouncer` role, written by its
+# entrypoint from DB_PASS_PGBOUNCER. The role and the lookup function
+# are created by db/sql/pgbouncer.psql on install and by
+# hooks/pre-update.sh on an update.
 
-USERLIST="$WORKDIR/pgbouncer/userlist.txt"
-mkdir -p "$(dirname "$USERLIST")"
-
-# `set -a; source $WORKDIR/.env; set +a` would be the natural way to
-# load brand env, but install.sh's preflight already loaded everything
-# we need into `compose --env-file`.  Use compose exec so the query
-# uses the right network + .pgpass.
-COMPOSE="docker compose --env-file $WORKDIR/.env"
-
-echo "hook/post-install: regenerating pgbouncer userlist from pg_authid"
-
-# `\copy` would be cleaner but pg_authid is restricted; query as
-# postgres superuser via `compose exec`.  Format inline to avoid
-# shelling-out a python step.
-$COMPOSE exec -T postgres \
-    psql -U postgres -tA \
-         -c "SELECT '\"' || rolname || '\" \"' || rolpassword || '\"'
-             FROM pg_authid
-             WHERE rolname IN ('kernel','admin','daemon','apibot','ocpp','ocpi','http','mailbot')
-             ORDER BY rolname" \
-    > "$USERLIST"
-
-if [[ ! -s "$USERLIST" ]]; then
-    echo "hook/post-install: WARN: pg_authid query returned empty — pgbouncer auth will fail" >&2
-    exit 1
-fi
-
-chmod 600 "$USERLIST"
-echo "hook/post-install: userlist written ($(wc -l < "$USERLIST") roles)"
-
-# Restart pgbouncer so it picks up the new file.  No-op if pgbouncer
-# isn't in the compose stack (compose ignores unknown services with
-# a warning, which is fine for non-pooled brands).
-$COMPOSE restart pgbouncer 2>&1 | sed 's/^/hook\/post-install: /'
+exit 0

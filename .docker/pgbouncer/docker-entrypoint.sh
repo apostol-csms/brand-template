@@ -1,22 +1,32 @@
 #!/bin/sh
 #
 # pgbouncer entrypoint.
-#   1. Render pgbouncer.ini from template (envsubst on $DB_NAME).
-#   2. Regenerate userlist.txt from postgres pg_authid so that password
-#      hashes match whatever postgres created (PG18 defaults to
-#      SCRAM-SHA-256 — previous static MD5 userlist no longer works).
+#   1. Render pgbouncer.ini from the template (envsubst).
+#   2. Write userlist.txt — ONE line: the password of the `pgbouncer` auth role.
 #   3. Exec pgbouncer.
 #
-# Required env (via compose env_file / environment:):
-#   DB_NAME                  — target database (for pgbouncer.ini)
-#   PGBOUNCER_PG_HOST        — postgres host (default: postgres)
-#   PGBOUNCER_PG_PORT        — postgres port (default: 5432)
-#   PGBOUNCER_SUPERUSER      — postgres role with read on pg_authid
-#                              (default: postgres)
-#   PGBOUNCER_SUPERPASSWORD  — its password (fallback: $POSTGRES_PASSWORD)
+# Why one line. userlist.txt used to be built from pg_authid, i.e. from the
+# SCRAM verifiers of every application role. A verifier is enough to
+# authenticate a client, but it cannot be used to log into the SERVER:
+# pgbouncer answers «server login failed: wrong password type» and logs
+# «password is SCRAM secret but client authentication did not provide SCRAM
+# keys». The scheme worked while passwords were md5 and broke on PostgreSQL 18,
+# where password_encryption defaults to scram-sha-256 — and since client
+# authentication still succeeded, it looked like a password problem.
 #
-# If no superuser credentials are present, the script falls back to the
-# static userlist.txt baked into the image (legacy behaviour).
+# Now the secret of an application role is fetched by query (auth_query, see
+# pgbouncer.ini.template) through the SECURITY DEFINER function
+# public.pgbouncer_get_auth, granted to the `pgbouncer` role only. No
+# application-role verifiers remain in the container, no superuser takes part
+# at runtime, and there is nothing to wait for postgres about at start-up.
+#
+# Required env:
+#   DB_NAME             — database (for pgbouncer.ini)
+#   DB_PASS_PGBOUNCER   — password of the `pgbouncer` role; the role is created
+#                         by the database install (db/sql/pgbouncer.psql) from
+#                         the very same value
+# Optional:
+#   PGBOUNCER_DEFAULT_POOL_SIZE, PGBOUNCER_MAX_DB_CONNECTIONS — pool sizing.
 set -eu
 
 export DB_NAME="${DB_NAME:-csms}"
@@ -29,43 +39,15 @@ envsubst '$DB_NAME $PGBOUNCER_DEFAULT_POOL_SIZE $PGBOUNCER_MAX_DB_CONNECTIONS' \
   < /etc/pgbouncer/pgbouncer.ini.template \
   > /etc/pgbouncer/pgbouncer.ini
 
-PGHOST="${PGBOUNCER_PG_HOST:-postgres}"
-PGPORT="${PGBOUNCER_PG_PORT:-5432}"
-SUPERUSER="${PGBOUNCER_SUPERUSER:-postgres}"
-SUPERPASS="${PGBOUNCER_SUPERPASSWORD:-${POSTGRES_PASSWORD:-}}"
-
-if [ -n "$SUPERPASS" ]; then
-  echo "pgbouncer: waiting for postgres at $PGHOST:$PGPORT"
-  tries=60
-  until PGPASSWORD="$SUPERPASS" psql -h "$PGHOST" -p "$PGPORT" \
-      -U "$SUPERUSER" -d postgres -c '\q' >/dev/null 2>&1; do
-    tries=$((tries - 1))
-    if [ "$tries" -le 0 ]; then
-      echo "pgbouncer: postgres unreachable after 60s — aborting" >&2
-      exit 1
-    fi
-    sleep 1
-  done
-
-  echo "pgbouncer: regenerating userlist.txt from pg_authid"
-  PGPASSWORD="$SUPERPASS" psql -h "$PGHOST" -p "$PGPORT" \
-      -U "$SUPERUSER" -d postgres -tAq \
-      -c "SELECT '\"' || rolname || '\" \"' || rolpassword || '\"'
-          FROM pg_authid
-          WHERE rolcanlogin AND rolpassword IS NOT NULL
-          ORDER BY rolname" \
-    > /etc/pgbouncer/userlist.txt.new
-  # Use cp -f instead of mv: when /etc/pgbouncer/userlist.txt is a
-  # single-file bind-mount (brand compose maps workdir/pgbouncer/userlist.txt
-  # over it for host-side regen by hooks/post-install.sh), `mv` fails with
-  # "Resource busy" because it tries to unlink the mount target.  cp
-  # truncates + writes in place and works regardless of whether the file
-  # is bind-mounted or part of the image's writable layer.
-  cat /etc/pgbouncer/userlist.txt.new > /etc/pgbouncer/userlist.txt
-  rm -f /etc/pgbouncer/userlist.txt.new
-  chmod 640 /etc/pgbouncer/userlist.txt
-else
-  echo "pgbouncer: no superuser password set — using static userlist.txt" >&2
+if [ -z "${DB_PASS_PGBOUNCER:-}" ]; then
+  echo "pgbouncer: DB_PASS_PGBOUNCER is not set — authentication cannot work" >&2
+  exit 1
 fi
+
+# Truncate-in-place (cat > file) rather than mv/cp: when userlist.txt arrives
+# as a single-file bind-mount, neither `mv` nor busybox `cp -f` can replace the
+# mount target, while opening the existing file for write can.
+printf '"pgbouncer" "%s"\n' "$DB_PASS_PGBOUNCER" > /etc/pgbouncer/userlist.txt
+chmod 640 /etc/pgbouncer/userlist.txt
 
 exec pgbouncer /etc/pgbouncer/pgbouncer.ini

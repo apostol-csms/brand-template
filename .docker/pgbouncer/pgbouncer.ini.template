@@ -4,8 +4,23 @@ ${DB_NAME} = host=postgres port=5432
 [pgbouncer]
 listen_addr = 0.0.0.0
 listen_port = 6432
-auth_type = scram-sha-256
-auth_file = /etc/pgbouncer/userlist.txt
+; The secret is fetched by query rather than read from the file — at the very
+; moment pgbouncer runs the SCRAM exchange with the client. Only then does it
+; retain the derived keys and log into the server by pass-through. With an
+; auth_file of SCRAM verifiers the client is authenticated but there is nothing
+; to log into the server with: «server login failed: wrong password type». The
+; scheme worked while passwords were md5 and broke on PostgreSQL 18, where
+; password_encryption defaults to scram-sha-256.
+;
+; auth_dbname is deliberately NOT set: the query runs in the same database the
+; client connects to. Setting it would require listing that database in
+; [databases] — exposing it through the pooler — and without such an entry
+; pgbouncer rejects EVERY connection with «authentication database ... is not
+; configured».
+auth_type  = scram-sha-256
+auth_file  = /etc/pgbouncer/userlist.txt
+auth_user  = pgbouncer
+auth_query = SELECT usename, passwd FROM public.pgbouncer_get_auth($1)
 pool_mode = session
 max_client_conn = 500
 default_pool_size = ${PGBOUNCER_DEFAULT_POOL_SIZE}
