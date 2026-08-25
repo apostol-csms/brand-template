@@ -10,21 +10,35 @@
 #   ./update.sh --rollback            # revert to previous installed version
 #   ./update.sh --dry-run
 #
-# Pipeline:
+# Pipeline — mirrors main() at the bottom of this file. Keep the two in step:
+# this header is read far more often than the code under it, and it spent
+# months describing the source-clone era that Phase 10 retired.
+#
 #   1. git pull brand-repo (ff-only)
 #   2. resolve target version (lock | --platform | --rollback)
-#   3. reload secrets (they may have rotated)
-#   4. docker pull csms-backend + csms-ocpp (new PLATFORM_VERSION)
-#   5. git pull workdir/db + workdir/frontend to new refs
-#   6. hooks/pre-update.sh
-#   7. docker compose build (locally-built images)
-#   8. docker compose run --rm db-migrate   ← blocking gate
+#      — --diff-compose reports and exits here
+#   3. reload secrets (they may have rotated), re-pin PLATFORM_VERSION into
+#      workdir/.env, refuse to continue if any CHANGE_ME survives
+#   4. docker compose pull --ignore-buildable — EVERY platform image named in
+#      compose (db, backend, ocpp, webapp, driver, pay, auth, ai-service), not
+#      a fixed pair. A tag published for only some of them fails the whole run
+#      right here — which is what makes --platform=<pre-release> unusable
+#      unless every image carries that tag.
+#   5. (nothing to git-pull: Phase 10 ships every platform component as an
+#      image. landing is the only brand-built frontend and lives in ../landing)
+#   6. render per-app env via envs/<env>/render.sh, when the brand has one
+#   7. hooks/pre-update.sh
+#   8. docker compose build — landing + local infra (nginx, pgbouncer, pgweb);
+#      with --frontend-only, landing alone
+#   9. docker compose run --rm db-migrate   ← blocking gate
 #      (on failure: exit 2, stack keeps running at old version)
-#   9. rolling restart: up -d --no-deps --force-recreate <services>
-#  10. hooks/post-update.sh
-#  11. record version (and prev, for --rollback)
-#  12. ./check.sh
-#  13. docker image prune -f
+#  10. rolling restart, TWO-PHASE: upstreams → wait until SPAs report healthy
+#      → only then nginx (see the comment at rolling_restart for why)
+#  11. hooks/post-update.sh
+#  12. record version (and prev, for --rollback)
+#  13. ./check.sh — note it exits 1 on a mere warning, and this step turns
+#      that into exit 2 for the whole update
+#  14. docker image prune -f
 
 set -euo pipefail
 
@@ -367,6 +381,26 @@ rolling_restart() {
   run compose_cmd up -d --no-deps --force-recreate nginx
 }
 
+# ─── Step 9b: Patch baseline ─────────────────────────────────────────
+#
+# Отметка «столько патчей числилось сразу после штатной миграции». check.sh
+# сравнивает с ней и объявляет всё, что появилось позже, применённым в обход
+# конвейера. Снимается только когда db-migrate реально отработал.
+
+record_patch_baseline() {
+  [[ $DRY_RUN -eq 1 || $FRONTEND_ONLY -eq 1 ]] && return 0
+  local PGDB CNT
+  PGDB="$(sed -n 's/^PGDATABASE=//p' "$WORKDIR/.env" | tail -1 | sed -e 's/^"//' -e 's/"$//')"
+  CNT="$(compose_cmd exec -T postgres psql -U postgres -d "${PGDB:-csms}" \
+           -tAc 'SELECT count(*) FROM db.patch_log' 2>/dev/null | tr -dc '0-9')"
+  if [[ -n "$CNT" ]]; then
+    echo "$CNT" > "$WORKDIR/.patch-count"
+    log "patch baseline: $CNT"
+  else
+    warn "patch baseline: could not read db.patch_log — skipped"
+  fi
+}
+
 # ─── Step 10: Hooks ──────────────────────────────────────────────────
 
 run_hook() {
@@ -447,6 +481,7 @@ render_app_env
 run_hook pre-update.sh
 rebuild_local
 run_db_migrate
+record_patch_baseline
 rolling_restart
 run_hook post-update.sh
 record_version

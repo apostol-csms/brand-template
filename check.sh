@@ -314,6 +314,50 @@ check_version_match() {
   fi
 }
 
+check_devmode() {
+  # Режим разработки объявляет себя НАЛИЧИЕМ ФАЙЛА, а не тем, что запущено.
+  # check_version_match смотрит на тег работающего контейнера и слеп ровно
+  # тогда, когда важнее всего: override положен, а пересоздание сервиса не
+  # прошло — площадка на пиновом образе, файл лежит, следующий update.sh
+  # упрётся в него. Причина режима — файл; сторожим причину.
+  local F
+  for F in docker-compose.override.yaml docker-compose.override.yml; do
+    if [[ -f "$SCRIPT_DIR/$F" ]]; then
+      record devmode warn "$F на площадке — режим разработки; update.sh не пройдёт"
+      return
+    fi
+  done
+  record devmode ok "override отсутствует"
+}
+
+check_patches() {
+  # Дрейф SQL: патч, накатанный на площадку руками с рабочей машины, попадает
+  # в db.patch_log, но не в образ. Сравнивать db.patch_log с деревом рабочей
+  # копии нельзя — она у каждого своя. Поэтому сравниваем с отметкой, которую
+  # update.sh снимает СРАЗУ ПОСЛЕ успешного db-migrate: всё, что появилось в
+  # журнале после неё, применено в обход конвейера и ждёт релиза.
+  #
+  # warn, не fail: «стенд впереди» — нормальное состояние стенда, а не отказ.
+  local BASE CUR PGDB
+  BASE="$(cat "$WORKDIR/.patch-count" 2>/dev/null)"
+  if [[ -z "$BASE" ]]; then
+    record patches ok "отметка не снята (появится после первого update.sh)"
+    return
+  fi
+  PGDB="$(sed -n 's/^PGDATABASE=//p' "$WORKDIR/.env" | tail -1 | sed -e 's/^"//' -e 's/"$//')"
+  CUR="$(compose_cmd exec -T postgres psql -U postgres -d "${PGDB:-csms}" \
+           -tAc 'SELECT count(*) FROM db.patch_log' 2>/dev/null | tr -dc '0-9')"
+  if [[ -z "$CUR" ]]; then
+    record patches warn "не удалось прочитать db.patch_log"
+  elif (( CUR > BASE )); then
+    record patches warn "$((CUR - BASE)) патч(ей) применены вне конвейера — ждут релиза"
+  elif (( CUR < BASE )); then
+    record patches warn "патчей меньше отметки ($CUR < $BASE) — база переустановлена?"
+  else
+    record patches ok "$CUR, совпадает с отметкой"
+  fi
+}
+
 # ─── Run all ─────────────────────────────────────────────────────────
 
 if [[ -f "$WORKDIR/.env" ]]; then
@@ -327,6 +371,8 @@ if [[ -f "$WORKDIR/.env" ]]; then
   check_disk
   check_memory
   check_version_match
+  check_patches
+  check_devmode
 fi
 
 # ─── Render ──────────────────────────────────────────────────────────
