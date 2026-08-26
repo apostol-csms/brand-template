@@ -61,6 +61,12 @@ name: '${PROJECT_NAME:?PROJECT_NAME must be set in workdir/.env (use the brand c
 # TCP-listen catches the real race we care about (process forked
 # but not yet accepting connections). Semantic HTTP checks live in
 # check.sh, probing from outside via public URLs.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
 x-spa-healthcheck: &spa-healthcheck
   test: ["CMD-SHELL", "netstat -tln 2>/dev/null | grep -q ':3000 ' || exit 1"]
   interval: 5s
@@ -154,13 +160,15 @@ services:
 
   postgres:
     image: ${BASE_REGISTRY:-docker.io/library}/postgres:18
+
+    logging: *default-logging
     container_name: postgres
     cap_add:
       - NET_ADMIN
     networks:
       - db-network
     ports:
-      - "5431:5432"
+      - "127.0.0.1:5431:5432"
     restart: unless-stopped
     # Tuning passed as `-c` flags so we keep the vanilla postgres:18
     # image (zero-build, Phase 10).  Mirrors the reference profile in
@@ -356,6 +364,8 @@ services:
 
   backend:
     image: ${REGISTRY:-ghcr.io/apostol-csms}/csms-backend:${PLATFORM_VERSION:-latest}
+
+    logging: *default-logging
     container_name: backend
     networks:
       - lan-network
@@ -393,6 +403,8 @@ services:
 
   ocpp:
     image: ${REGISTRY:-ghcr.io/apostol-csms}/csms-ocpp:${PLATFORM_VERSION:-latest}
+
+    logging: *default-logging
     container_name: ocpp
     networks:
       - lan-network
