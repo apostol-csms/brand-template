@@ -75,14 +75,27 @@ fi
 echo "hook/pre-update: ensuring pgbouncer auth role"
 # Пароль передаётся psql-переменной: :'pgbpass' экранируется самим psql.
 # Подстановка значения прямо в текст SQL сломалась бы на кавычке в пароле.
+#
+# Но внутрь DO-блока переменную передаёт GUC, а не :'pgbpass' напрямую: psql
+# НЕ подставляет свои переменные внутри dollar-quoted строки, и написанное там
+# :'pgbpass' доезжает до сервера буквально — `syntax error at or near ":"`.
+# Тем же приёмом это решено в db/sql/pgbouncer.psql (там и комментарий).
 $COMPOSE exec -T postgres psql -v ON_ERROR_STOP=1 -U postgres \
     -d "${PGDATABASE:-csms}" -v pgbpass="$DB_PASS_PGBOUNCER" <<SQL
+SELECT set_config('password.pgbouncer', :'pgbpass', false);
+
 DO \$\$
+DECLARE
+  vPassword text := coalesce(current_setting('password.pgbouncer', true), '');
 BEGIN
+  IF vPassword = '' THEN
+    RAISE EXCEPTION 'hook/pre-update: пароль роли pgbouncer пуст — проверь DB_PASS_PGBOUNCER в workdir/.env';
+  END IF;
+
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'pgbouncer') THEN
-    EXECUTE format('CREATE ROLE pgbouncer LOGIN PASSWORD %L', :'pgbpass');
+    EXECUTE format('CREATE ROLE pgbouncer LOGIN PASSWORD %L', vPassword);
   ELSE
-    EXECUTE format('ALTER ROLE pgbouncer LOGIN PASSWORD %L', :'pgbpass');
+    EXECUTE format('ALTER ROLE pgbouncer LOGIN PASSWORD %L', vPassword);
   END IF;
 END
 \$\$;
