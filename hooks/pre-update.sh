@@ -62,8 +62,21 @@ fi
 : "${WORKDIR:?WORKDIR required}"
 COMPOSE="docker compose --env-file $WORKDIR/.env"
 
-# shellcheck disable=SC1090
-set -a; . "$WORKDIR/.env"; set +a
+# workdir/.env — это env_file для Docker, а НЕ сценарий оболочки. Docker берёт
+# всё после первого `=` буквально, поэтому значение законно может содержать
+# `;`, пробелы, кавычки и `$`. Исполнять такой файл через `.` нельзя: на
+# ocpp-css строка `BRANDING_MARK=data:image/svg+xml;base64,…` разрезалась по
+# `;`, хвост ушёл в оболочку как команда, и обновление встало.
+#
+# Читаем только нужные ключи и берём ПОСЛЕДНЕЕ вхождение — именно его берёт
+# Docker, потому что install.sh не сливает шаблоны, а склеивает корневой с
+# посредовым, и приоритет держится порядком строк.
+env_get() {
+    sed -n "s/^$1=//p" "$WORKDIR/.env" | tail -1
+}
+
+DB_PASS_PGBOUNCER="$(env_get DB_PASS_PGBOUNCER)"
+PGDATABASE="$(env_get PGDATABASE)"
 
 if [[ -z "${DB_PASS_PGBOUNCER:-}" ]]; then
     echo "hook/pre-update: DB_PASS_PGBOUNCER is not set in $WORKDIR/.env." >&2
