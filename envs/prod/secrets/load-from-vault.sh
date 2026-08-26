@@ -127,6 +127,8 @@ case "$PROVIDER" in
     export STRIPE_WEBHOOK_SECRET="$(vget stripe_webhook_secret)"
     export STADIA_API_KEY="$(vget stadia_api_key)"
     export GOOGLE_CLIENT_SECRET="$(vget google_client_secret)"
+    export YANDEX_CLIENT_ID="$(vget yandex_client_id)"
+    export YANDEX_CLIENT_SECRET="$(vget yandex_client_secret)"
     ;;
 
   aws-sm)
@@ -161,6 +163,8 @@ case "$PROVIDER" in
     export STRIPE_WEBHOOK_SECRET="$(smget stripe-webhook-secret)"
     export STADIA_API_KEY="$(smget stadia-api-key)"
     export GOOGLE_CLIENT_SECRET="$(smget google-client-secret)"
+    export YANDEX_CLIENT_ID="$(smget yandex-client-id)"
+    export YANDEX_CLIENT_SECRET="$(smget yandex-client-secret)"
     ;;
 
   *)
@@ -203,6 +207,7 @@ OPTIONAL=(
   # cleanly without warnings.
   GIT_TOKEN
   GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET
+  YANDEX_CLIENT_ID YANDEX_CLIENT_SECRET
   STRIPE_API_KEY STRIPE_SECRET_KEY STRIPE_PUBLISHABLE_KEY STRIPE_WEBHOOK_SECRET
   YOOKASSA_SHOP_KEY YOOKASSA_OAUTH_CLIENT_SECRET
   STADIA_API_KEY GOOGLE_MAPS_API_KEY YANDEX_MAPS_API_KEY
