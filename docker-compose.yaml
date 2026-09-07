@@ -131,6 +131,12 @@ services:
     restart: unless-stopped
     volumes:
       - letsencrypt:/etc/letsencrypt
+      # T193 — журналы переживают пересоздание контейнера.
+      # Без этих томов ws_access.log / ocpp_access.log / expert-archive.log
+      # и история продления сертификатов лежат в записываемом слое и
+      # исчезают на каждой раскатке (update.sh --force-recreate).
+      - logs-nginx:/var/log/nginx
+      - logs-certbot:/var/log/letsencrypt
 
   wireguard:
     build: ./.docker/wireguard
@@ -392,6 +398,8 @@ services:
     volumes:
       - tmp:/tmp/csms
       - files:/etc/csms/files
+      # T193 — error.log + postgres.log переживают пересоздание.
+      - logs-backend:/var/log/csms
       # License envelope — read by both process-LicenseServer (Phase 3a)
       # and module-LicenseServer (Phase 3b) at boot + on mtime change.
       - ./conf/license.json:/etc/csms/conf/license.json:ro
@@ -431,6 +439,13 @@ services:
       PGUSERAPI: apibot
       API_HOST: cloud.${DOMAIN:-localhost}
       OCPP_HOST: cs.${DOMAIN:-localhost}
+    volumes:
+      # T193 — /var/log/cs/error.log и /etc/cs/logs/postgres.log
+      # переживают пересоздание. Второй — единственный носитель
+      # номера счёта из URL станции (пятый аргумент ocpp.parse): в базе
+      # его нет, и без тома приёмка T196 не имеет чем подтвердиться.
+      - logs-ocpp:/var/log/cs
+      - logs-ocpp-pg:/etc/cs/logs
     depends_on:
       - backend
 
@@ -618,6 +633,30 @@ networks:
 
 volumes:
   letsencrypt:
+  # T193 — журналы приложений и nginx. Именованные тома, потому что
+  # записываемый слой контейнера умирает на каждом --force-recreate,
+  # то есть окно наблюдаемости равнялось времени с последней раскатки.
+  #
+  # РОТАЦИЯ. У backend и ocpp она СВОЯ, внутри libapostol, а не logrotate:
+  # APP_DEFAULT_LOG_MAX_SIZE=104857600 (CMakeLists), log_keep_rotated=5,
+  # log_compress=true, FileTarget::rotate() по current_size_ >= max_size_.
+  # В брендах не переопределяется. Значит logs-backend / logs-ocpp /
+  # logs-ocpp-pg ОГРАНИЧЕНЫ: ~100 МБ живого файла плюс пять сжатых.
+  # Неограниченно растёт ТОЛЬКО logs-nginx: в образе nginx logrotate нет,
+  # ws_access.log / ocpp_access.log / expert-archive.log не ротирует ничто.
+  # Рост там медленный (~0,3 МБ в сутки на боевой), но верхней границы нет.
+  #
+  # ЛОВУШКА, если возьмётесь за ротацию nginx. Содержимое /var/log/nginx
+  # копируется в том ОДИН раз, при создании тома, вместе с симлинками
+  # access.log -> /dev/stdout и error.log -> /dev/stderr. `rm *.log` внутри
+  # тома удалит и их; nginx создаст на их месте обычные файлы, и docker logs
+  # nginx замолчит НАВСЕГДА — без ошибки и без строки в журнале. logrotate
+  # здесь только с copytruncate либо с явным исключением этих двух имён.
+  logs-nginx:
+  logs-certbot:
+  logs-backend:
+  logs-ocpp:
+  logs-ocpp-pg:
   postgresql:
   files:
   csms-secrets:   # Persistent role passwords + oauth client secrets.
