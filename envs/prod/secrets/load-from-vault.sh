@@ -209,6 +209,10 @@ OPTIONAL=(
   GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET
   YANDEX_CLIENT_ID YANDEX_CLIENT_SECRET
   STRIPE_API_KEY STRIPE_SECRET_KEY STRIPE_PUBLISHABLE_KEY STRIPE_WEBHOOK_SECRET
+  # Connect: second webhook endpoint (events on connected accounts) and
+  # OAuth for Standard accounts (T280/T282). Seeded into the registry by
+  # db-init only; on a running database they are written by hand.
+  STRIPE_CONNECT_WEBHOOK_SECRET STRIPE_CONNECT_CLIENT_ID STRIPE_CONNECT_REDIRECT_URI
   YOOKASSA_SHOP_KEY YOOKASSA_OAUTH_CLIENT_SECRET
   STADIA_API_KEY GOOGLE_MAPS_API_KEY YANDEX_MAPS_API_KEY
   # AI support agent — only consumed when the `ai` compose profile is on.
