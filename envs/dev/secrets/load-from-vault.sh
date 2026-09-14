@@ -193,6 +193,12 @@ MANDATORY=(
   POSTGRES_PASSWORD
   DB_PASS_KERNEL DB_PASS_ADMIN DB_PASS_DAEMON DB_PASS_APIBOT DB_PASS_MAILBOT
   DB_PASS_OCPP DB_PASS_OCPI DB_PASS_HTTP DB_PASS_CPO DB_PASS_DRIVER
+  # The pooler's own role (T176): .docker/pgbouncer refuses to start without
+  # it and db-init creates the role from it. It sat in .env.template as
+  # CHANGE_ME and in no dispatcher, so a clean install died at install.sh's
+  # CHANGE_ME gate while running deployments hid it — the value had been put
+  # into workdir/.env by hand (2026-09-14, chargemecar stage from scratch).
+  DB_PASS_PGBOUNCER
   OAUTH2_SECRET_SERVICE OAUTH2_SECRET_WEB OAUTH2_SECRET_ANDROID
   OAUTH2_SECRET_IOS OAUTH2_SECRET_OCPP
   SMTP_PASSWORD_INFO SMTP_PASSWORD_NOREPLY SMTP_PASSWORD_SUPPORT NUXT_SMTP_PASS
