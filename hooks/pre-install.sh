@@ -116,8 +116,14 @@ LIVE_DIR="$CERTBOT_CTX/live"
 if [[ -d "$LIVE_DIR" ]]; then
   # Need a DOMAIN to know what the apex cert dir is called.
   # workdir/.env is built earlier in install.sh — load it.
+  # workdir/.env is a CONCATENATION (root .env.template, then envs/<env>/):
+  # the root carries DOMAIN=example.com and the env file the real one, so
+  # the same key appears twice and the LAST line is the one compose uses.
+  # `head -1` here picked example.com, no live/example.com/ existed, and
+  # the symlinks were silently skipped — nginx then died on
+  # live/cloud.<domain>/fullchain.pem (T323, first graftio install).
   if [[ -f "$WORKDIR/.env" ]] && grep -qE '^DOMAIN=' "$WORKDIR/.env"; then
-    DOMAIN="$(grep -E '^DOMAIN=' "$WORKDIR/.env" | head -1 | cut -d= -f2-)"
+    DOMAIN="$(grep -E '^DOMAIN=' "$WORKDIR/.env" | tail -1 | cut -d= -f2-)"
     DOMAIN="${DOMAIN%\"}"; DOMAIN="${DOMAIN#\"}"   # strip quotes
   fi
 
