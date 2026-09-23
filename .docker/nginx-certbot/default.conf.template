@@ -395,7 +395,7 @@ server {
 
     ssl_stapling off;
 
-    access_log /var/log/nginx/ocpp_access.log;
+    access_log /var/log/nginx/ocpp_access.log ws_handshake;
     error_log  /var/log/nginx/ocpp_error.log;
 
     client_max_body_size       10m;
@@ -608,7 +608,7 @@ server {
 
     server_name ws.${DOMAIN};
 
-    access_log  /var/log/nginx/ws_access.log;
+    access_log  /var/log/nginx/ws_access.log ws_handshake;
     error_log   /var/log/nginx/ws_error.log;
 
     # This block owns :80 for ws.${DOMAIN} (plain ws:// for OCPP stations
