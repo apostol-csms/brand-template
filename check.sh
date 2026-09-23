@@ -8,7 +8,7 @@
 #   ./check.sh --local      # probe via 127.0.0.1 (bypass hairpin NAT)
 #
 # Checks:
-#   [containers]  all compose services running + healthy
+#   [containers]  every compose service has a container, running + healthy
 #   [restart]     no long-running container with restart policy "no" (T393)
 #   [postgres]    pg_isready from inside the container
 #   [api]         GET https://cloud.${DOMAIN}/api/v1/ping → 200
@@ -141,30 +141,49 @@ set_resolve() {
 
 # ─── Checks ──────────────────────────────────────────────────────────
 
+# One-shot jobs: they exit by design, so "not running" is their normal state
+# and "restart: no" is their correct policy. Shared by check_containers and
+# check_restart.
+ONE_SHOT=" db-init db-migrate "
+
+# T394 — the list of what SHOULD run comes from compose, not from `docker ps`.
+# Without -a a stopped container simply vanishes from `ps`, and the check used
+# to stay green: that is how frontend/landing/pay lay dead on the ocpp-css prod
+# on 23.09 (T393) while this reported "services up".
 check_containers() {
   if ! command -v docker >/dev/null 2>&1; then
     record containers fail "docker not found"; return
   fi
-  local OUT UNHEALTHY=""
-  if ! OUT="$(compose_cmd ps --format json 2>/dev/null)"; then
+  local EXPECTED OUT BAD="" MISSING="" SVC PRESENT COUNT=0
+  if ! EXPECTED="$(compose_cmd config --services 2>/dev/null)"; then
+    record containers fail "docker compose config failed"; return
+  fi
+  if ! OUT="$(compose_cmd ps -a --format json 2>/dev/null)"; then
     record containers fail "docker compose ps failed"; return
   fi
-  if [[ -z "$OUT" ]]; then
-    record containers fail "no services running"; return
-  fi
-  # Each line is one service in recent compose versions. `jq -s .` normalises.
-  local BAD
-  BAD="$(printf '%s\n' "$OUT" | jq -rs '
-    .[]
+  # Recent compose prints one object per line, older versions one array;
+  # `jq -s` plus the flatten step reads both.
+  PRESENT="$(printf '%s\n' "$OUT" | jq -rs '.[] | if type == "array" then .[] else . end | .Service' 2>/dev/null)"
+  while read -r SVC; do
+    [[ -z "$SVC" || "$ONE_SHOT" == *" $SVC "* ]] && continue
+    COUNT=$((COUNT + 1))
+    grep -qxF "$SVC" <<<"$PRESENT" || MISSING+="${MISSING:+ }$SVC"
+  done <<<"$EXPECTED"
+  # A jq failure must not read as "nothing bad" — that is a false green.
+  if ! BAD="$(printf '%s\n' "$OUT" | jq -rs --arg oneshot "$ONE_SHOT" '
+    .[] | if type == "array" then .[] else . end
+    | .Service as $s
+    | select(($oneshot | contains(" " + $s + " ")) | not)
     | select(.State != "running" or (.Health? and .Health != "healthy" and .Health != ""))
-    | "\(.Service)=\(.State)\(if .Health then "/"+.Health else "" end)"
-  ' 2>/dev/null)"
-  if [[ -n "$BAD" ]]; then
-    record containers fail "not running/healthy: $(echo "$BAD" | tr '\n' ' ')"
+    | "\($s)=\(.State)\(if (.Health // "") != "" then "/"+.Health else "" end)"
+  ' 2>/dev/null)"; then
+    record containers fail "cannot parse docker compose ps"; return
+  fi
+  BAD="$(tr '\n' ' ' <<<"$BAD")"; BAD="${BAD% }"
+  if [[ -n "$BAD" || -n "$MISSING" ]]; then
+    record containers fail "${BAD:+not running/healthy: $BAD}${BAD:+${MISSING:+; }}${MISSING:+no container: $MISSING}"
   else
-    local COUNT
-    COUNT="$(printf '%s\n' "$OUT" | jq -rs 'length')"
-    record containers ok "$COUNT services up"
+    record containers ok "$COUNT services up (one-shot jobs excluded)"
   fi
 }
 
@@ -172,8 +191,7 @@ check_containers() {
 # restart or a reboot. On 23.09 an `apt upgrade` restarted dockerd on the
 # ocpp-css prod; frontend, landing and pay had no `restart:` in compose
 # (policy "no"), stayed down and cloud. answered 502 for 36 minutes.
-# One-shot jobs are exempt: they exit by design and must NOT be restarted.
-RESTART_EXEMPT=" db-init db-migrate "
+# One-shot jobs (ONE_SHOT above) are exempt: they exit by design.
 
 check_restart() {
   command -v docker >/dev/null 2>&1 || return
@@ -186,7 +204,7 @@ check_restart() {
     record restart warn "docker inspect failed"; return
   fi
   while IFS='|' read -r SVC POL; do
-    [[ "$RESTART_EXEMPT" == *" $SVC "* ]] && continue
+    [[ "$ONE_SHOT" == *" $SVC "* ]] && continue
     [[ "$POL" == "no" || -z "$POL" ]] && BAD+="${BAD:+ }${SVC:-?}"
   done <<<"$INFO"
   if [[ -n "$BAD" ]]; then
