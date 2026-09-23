@@ -501,6 +501,7 @@ services:
     # before recreating, and an explicit pull ignores this policy.
     pull_policy: missing
     container_name: landing
+    restart: unless-stopped
     networks:
       - lan-network
     env_file:
@@ -514,6 +515,7 @@ services:
   frontend:
     image: ${REGISTRY:-ghcr.io/apostol-csms}/csms-webapp:${PLATFORM_VERSION:-latest}
     container_name: frontend
+    restart: unless-stopped
     env_file:
       - ./workdir/.env
     networks:
@@ -533,6 +535,7 @@ services:
   pay:
     image: ${REGISTRY:-ghcr.io/apostol-csms}/csms-pay:${PLATFORM_VERSION:-latest}
     container_name: pay
+    restart: unless-stopped
     env_file:
       - ./workdir/.env
     networks:

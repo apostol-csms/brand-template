@@ -9,6 +9,7 @@
 #
 # Checks:
 #   [containers]  all compose services running + healthy
+#   [restart]     no long-running container with restart policy "no" (T393)
 #   [postgres]    pg_isready from inside the container
 #   [api]         GET https://cloud.${DOMAIN}/api/v1/ping → 200
 #   [openid]      GET https://auth.${DOMAIN}/.well-known/openid-configuration
@@ -164,6 +165,34 @@ check_containers() {
     local COUNT
     COUNT="$(printf '%s\n' "$OUT" | jq -rs 'length')"
     record containers ok "$COUNT services up"
+  fi
+}
+
+# T393 — every long-running container must come back after a Docker daemon
+# restart or a reboot. On 23.09 an `apt upgrade` restarted dockerd on the
+# ocpp-css prod; frontend, landing and pay had no `restart:` in compose
+# (policy "no"), stayed down and cloud. answered 502 for 36 minutes.
+# One-shot jobs are exempt: they exit by design and must NOT be restarted.
+RESTART_EXEMPT=" db-init db-migrate "
+
+check_restart() {
+  command -v docker >/dev/null 2>&1 || return
+  local IDS INFO BAD="" SVC POL
+  IDS="$(compose_cmd ps -a -q 2>/dev/null)"
+  [[ -z "$IDS" ]] && { record restart warn "no containers found"; return; }
+  # `|` as the separator, not a space: `read` trims whitespace, so an empty
+  # policy ("frontend ") would otherwise lose its separator and slip through.
+  if ! INFO="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}}|{{.HostConfig.RestartPolicy.Name}}' $IDS 2>/dev/null)"; then
+    record restart warn "docker inspect failed"; return
+  fi
+  while IFS='|' read -r SVC POL; do
+    [[ "$RESTART_EXEMPT" == *" $SVC "* ]] && continue
+    [[ "$POL" == "no" || -z "$POL" ]] && BAD+="${BAD:+ }${SVC:-?}"
+  done <<<"$INFO"
+  if [[ -n "$BAD" ]]; then
+    record restart warn "restart policy \"no\" — will not survive a dockerd restart/reboot: $BAD"
+  else
+    record restart ok "every long-running container has a restart policy"
   fi
 }
 
@@ -362,6 +391,7 @@ check_patches() {
 
 if [[ -f "$WORKDIR/.env" ]]; then
   check_containers
+  check_restart
   check_postgres
   check_api_ping
   check_openid
