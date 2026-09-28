@@ -33,7 +33,9 @@
 #   9. docker compose run --rm db-migrate   ← blocking gate
 #      (on failure: exit 2, stack keeps running at old version)
 #  10. rolling restart, TWO-PHASE: upstreams → wait until SPAs report healthy
-#      → only then nginx (see the comment at rolling_restart for why)
+#      → only then nginx (see the comment at rolling_restart for why). Inside
+#      phase 1 ocpp waits for backend: it is recreated only once the new
+#      backend is subscribed to LISTEN (see wait_backend_listening, T578)
 #  11. hooks/post-update.sh
 #  12. record version (and prev, for --rollback)
 #  13. ./check.sh — note it exits 1 on a mere warning, and this step turns
@@ -310,7 +312,8 @@ run_db_migrate() {
 # that now points at the wrong container (bare ${DOMAIN} serving the
 # auth SPA is the canonical symptom). Sequence:
 #
-#   Phase 1: --force-recreate upstreams (backend, ocpp, SPAs, pg*).
+#   Phase 1: --force-recreate upstreams (backend, SPAs, pg*), then —
+#            once backend listens — ocpp (the LISTEN gate below, T578).
 #            Wait until every SPA reports healthy (from its
 #            `x-spa-healthcheck` in docker-compose.yaml).
 #   Phase 2: --force-recreate nginx. Its resolver cache starts fresh
@@ -364,18 +367,132 @@ wait_spas_healthy() {
   exit 2
 }
 
+# ─── Backend LISTEN gate (T578) ──────────────────────────────────────
+#
+# ocpp goes up only after the new backend has subscribed. A fresh ocpp
+# takes every station's reconnect at once, and each one runs OCPP logic in
+# the database. Whatever that logic queues for sending — a payment capture,
+# a Get* command to a station — is an http.request row announced by NOTIFY
+# on channel "http" and picked up by backend's PGFetch. With nobody
+# listening the NOTIFY is simply gone and the row stays in state 1 for good
+# (cpms 28.09: stations were back 2–3 s before backend listened, 27 rows
+# stranded, two of them captures; T577 is the fix on the backend side, this
+# gate is the second line). Hence, inside phase 1:
+#
+#   1a. recreate every upstream except ocpp — backend together with
+#       pgbouncer, as brands/CLAUDE.md requires;
+#   1b. wait until the NEW backend listens: a listener connection opened
+#       after 1a carries channel "http", and every database user holds at
+#       least as many listener connections as it did before 1a;
+#   1c. only then recreate ocpp. Until then the old ocpp keeps the stations.
+#
+# What the gate does NOT close: while backend itself restarts in 1a, the old
+# ocpp keeps working, and an http.request it queues in those seconds (a
+# StopTransaction's capture) still loses its NOTIFY. That window is ordinary
+# traffic, not the reconnect burst — only T577 (PGFetch rescans the queue at
+# start) closes it. Also, the old ocpp goes through pgbouncer, which is
+# recreated in 1a under it: idle connections reconnect, an in-flight query
+# fails once and the station repeats its message.
+#
+# Readiness is read from pg_stat_activity, not waited out with a sleep: a
+# listener connection shows its LISTEN batch as its last query (libapostol
+# ships a process's channels as one batch — `LISTEN "file";LISTEN "http";`)
+# and runs nothing else on it; `state = 'idle'` means the batch has committed.
+# Both queries skip their own session: the pattern '%LISTEN "http";%' is
+# itself text of the query and would otherwise find the check it runs in.
+# No "http" listener within WAIT_LISTEN_MAX_S → exit 2 with ocpp and nginx
+# untouched. Fewer listener connections than before → a warning only: that
+# is the deaf-worker case of the pgbouncer rule, not a reason to hold ocpp.
+
+LISTEN_CHANNEL="http"
+WAIT_LISTEN_MAX_S=60
+
+# Rows as "<col> <col>", one per line; empty on any failure — no postgres
+# service in compose (an external database) or the database not answering.
+pg_query() {
+  local PGDB
+  PGDB="$(sed -n 's/^PGDATABASE=//p' "$WORKDIR/.env" | tail -1 | sed -e 's/^"//' -e 's/"$//')"
+  compose_cmd exec -T postgres psql -X -U postgres -d "${PGDB:-csms}" -tA -F ' ' -c "$1" 2>/dev/null || true
+}
+
+# "<user> <count>" of listener connections opened at or after $1.
+listeners_since() {
+  pg_query "SELECT usename, count(*) FROM pg_stat_activity
+             WHERE datname = current_database() AND pid <> pg_backend_pid()
+               AND state = 'idle' AND query ILIKE 'LISTEN%' AND backend_start >= '$1'
+             GROUP BY 1 ORDER BY 1"
+}
+
+wait_backend_listening() {
+  local T0="$1" BASE="$2"
+  [[ $DRY_RUN -eq 1 ]] && { log "[dry-run] skip wait_backend_listening"; return 0; }
+  if [[ -z "$T0" ]]; then
+    warn "LISTEN gate skipped: postgres does not answer through compose (external database?)"
+    warn "  ocpp follows backend unchecked"
+    return 0
+  fi
+  log "  wait backend LISTEN \"$LISTEN_CHANNEL\" (max ${WAIT_LISTEN_MAX_S}s; before: $(echo $BASE))…"
+  local t=0 http now short user want have
+  while (( t < WAIT_LISTEN_MAX_S )); do
+    http="$(pg_query "SELECT count(*) FROM pg_stat_activity
+                       WHERE datname = current_database() AND pid <> pg_backend_pid()
+                         AND state = 'idle' AND query LIKE '%LISTEN \"$LISTEN_CHANNEL\";%'
+                         AND backend_start >= '$T0'" | tr -dc '0-9')"
+    now="$(listeners_since "$T0")"
+    short=""
+    while read -r user want; do
+      [[ -n "$user" ]] || continue
+      have="$(awk -v u="$user" '$1 == u { print $2 }' <<<"$now")"
+      (( ${have:-0} >= want )) || short="$short $user=${have:-0}/$want"
+    done <<<"$BASE"
+    if (( ${http:-0} >= 1 )) && [[ -z "$short" ]]; then
+      log "  backend listening after ${t}s: $(echo $now)"
+      return 0
+    fi
+    sleep 2; t=$((t+2))
+  done
+  if (( ${http:-0} < 1 )); then
+    err "backend did not LISTEN \"$LISTEN_CHANNEL\" within ${WAIT_LISTEN_MAX_S}s"
+    err "  ocpp and nginx NOT recreated — the old ocpp keeps the stations. Investigate:"
+    err "  docker compose --env-file workdir/.env logs backend pgbouncer --tail=80"
+    exit 2
+  fi
+  warn "backend listens on \"$LISTEN_CHANNEL\", but holds fewer listener connections than before:$short"
+  warn "  proceeding with ocpp; check the subscriptions as brands/CLAUDE.md describes (pgbouncer rule)"
+}
+
 rolling_restart() {
-  local UPSTREAM
+  local UPSTREAM LATE=""
   if [[ $FRONTEND_ONLY -eq 1 ]]; then
     UPSTREAM="$SPA_SERVICES"
   else
-    UPSTREAM="backend ocpp ai-service $SPA_SERVICES pgbouncer pgweb"
+    UPSTREAM="backend ai-service $SPA_SERVICES pgbouncer pgweb"
+    LATE="ocpp"
   fi
   # Drop services not declared in the brand's docker-compose.yaml.
   UPSTREAM="$(filter_present_services "$UPSTREAM")"
-  log "rolling restart (phase 1 — upstreams): $UPSTREAM"
-  # shellcheck disable=SC2086
-  run compose_cmd up -d --no-deps --force-recreate $UPSTREAM
+  [[ -n "$LATE" ]] && LATE="$(filter_present_services "$LATE")"
+  if [[ -n "$LATE" ]]; then
+    local T0="" BASE=""
+    if [[ $DRY_RUN -eq 0 ]]; then
+      T0="$(pg_query 'SELECT now()')"
+      # Anything but a timestamp would fail both gate queries and end in a
+      # false exit 2 — treat it as "postgres does not answer" instead.
+      [[ $T0 =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}\  ]] || T0=""
+      BASE="$(listeners_since '-infinity')"
+    fi
+    log "rolling restart (phase 1a — upstreams, $LATE held back): $UPSTREAM"
+    # shellcheck disable=SC2086
+    run compose_cmd up -d --no-deps --force-recreate $UPSTREAM
+    wait_backend_listening "$T0" "$BASE"
+    log "rolling restart (phase 1b — $LATE, backend is listening)"
+    # shellcheck disable=SC2086
+    run compose_cmd up -d --no-deps --force-recreate $LATE
+  else
+    log "rolling restart (phase 1 — upstreams): $UPSTREAM"
+    # shellcheck disable=SC2086
+    run compose_cmd up -d --no-deps --force-recreate $UPSTREAM
+  fi
   wait_spas_healthy
   log "rolling restart (phase 2 — nginx)"
   run compose_cmd up -d --no-deps --force-recreate nginx
