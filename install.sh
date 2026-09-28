@@ -483,6 +483,33 @@ load_secrets() {
   chmod 600 "$WORKDIR/.env"
 }
 
+# ─── Step 6b: Brand primary colour (T610) ───────────────────────────
+#
+# BRANDING_{LIGHT,DARK}_PRIMARY_COLOR is seeded into db.brand_manifest at
+# first boot and nothing re-syncs it. A primary on which neither white nor
+# the theme's dark ink reaches 4.5:1 would put sub-AA text on every button,
+# so it is refused here, before anything starts (DECISIONS.md:6899). The
+# rule and its inks are the fronts' — see check-primary.sh.
+
+validate_brand_colors() {
+  log "validate brand primary colours"
+  [[ $DRY_RUN -eq 1 && ! -f "$WORKDIR/.env" ]] && return 0
+  local rc=0
+  "$SCRIPT_DIR/check-primary.sh" --env "$WORKDIR/.env" || rc=$?
+  (( rc == 0 )) && return 0
+  if [[ $DRY_RUN -eq 1 ]]; then
+    # merge_env does not write in a dry run: this was the previous workdir/.env
+    warn "dry-run: the check above ran on the existing workdir/.env (rc=$rc), not on what this run would merge"
+    return 0
+  fi
+  if (( rc == 1 )); then
+    err "brand primary refused — change BRANDING_{LIGHT,DARK}_PRIMARY_COLOR, then re-run."
+  else
+    err "the colour check itself failed (check-primary.sh rc=$rc) — the colour is not the cause"
+  fi
+  exit 1
+}
+
 # ─── Step 7: Clone private sources (landing only) ────────────────────
 #
 # Phase 10 — db, frontend, auth are now pulled as public GHCR images.
@@ -659,6 +686,7 @@ load_platform_lock
 merge_env
 validate_identity
 load_secrets
+validate_brand_colors
 clone_sources
 render_app_env
 registry_login
