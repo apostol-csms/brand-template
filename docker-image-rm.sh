@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Remove the images built locally for this stack (<PROJECT_NAME>-*:
-# nginx, pgbouncer, pgweb, landing). Platform images from the registry are
+# nginx, pgbouncer, landing). Platform images from the registry are
 # left alone — they are shared and slow to pull again.
 #
 #   ./docker-image-rm.sh          ask for confirmation

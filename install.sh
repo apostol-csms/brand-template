@@ -572,7 +572,7 @@ pull_images() {
 
 build_local() {
   log "docker compose build (infra + landing only)"
-  # Only buildable services remain: nginx, pgbouncer, pgweb, wireguard,
+  # Only buildable services remain: nginx, pgbouncer, wireguard,
   # and the brand-specific landing.  Platform images are already pulled.
   run docker compose --env-file "$WORKDIR/.env" build
 }

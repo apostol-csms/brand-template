@@ -81,9 +81,9 @@ hours until the certificate expires.
 ### Pulling from a private registry
 
 Defaults are the public contour: platform images from GHCR, base images
-from Docker Hub. A brand mirroring images into its own registry sets four
+from Docker Hub. A brand mirroring images into its own registry sets three
 variables in `envs/<env>/.env.template` — `REGISTRY`, `BASE_REGISTRY`,
-`PGBOUNCER_IMAGE`, `PGWEB_IMAGE` (see `[R-0]` in `.env.template`) — and
+`PGBOUNCER_IMAGE` (see `[R-0]` in `.env.template`) — and
 puts `REGISTRY_USER` / `REGISTRY_PASS` in `.secrets/<env>.env`.
 `install.sh` and `update.sh` then run `docker login` before `compose
 pull`; with the variables absent the step is skipped and nothing changes.
@@ -299,7 +299,7 @@ perfectly healthy. Run it with `--local`.
 │   │   ├── default.conf.template     Per-subdomain server blocks (envsubst $DOMAIN)
 │   │   ├── nginx.conf                resolver + $*_upstream maps
 │   │   └── entrypoint.sh             render config → certbot renew loop
-│   ├── pgbouncer/  pgweb/            Built; ARG-parameterised base image
+│   ├── pgbouncer/                    Built; ARG-parameterised base image
 │   └── auth/ db-migrate/ postgres/ test-run/ wireguard/
 │                                     Not built by this compose — kept as the
 │                                     shared canonical home (postgres/postgresql.conf

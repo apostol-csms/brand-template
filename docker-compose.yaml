@@ -3,7 +3,7 @@
 # Pure-image deployment: every platform component is pulled from GHCR
 # and pinned by digest in envs/<env>/platform.lock.json → PLATFORM_VERSION
 # in workdir/.env.  The brand side never builds platform code; only
-# infra (nginx/pgbouncer/pgweb) and the brand-specific landing site are
+# infra (nginx/pgbouncer) and the brand-specific landing site are
 # built locally.
 #
 # Usage:
@@ -21,7 +21,7 @@
 #   - SPA images are brand-agnostic — runtime brand identity comes from
 #     the license attestation chain (Phase 6/7/8/9).
 #   - Landing is brand-specific (per <brand>/landing repo) — `build:`.
-#   - Infra (nginx, pgbouncer, pgweb): bundled .docker/ Dockerfiles.
+#   - Infra (nginx, pgbouncer): bundled .docker/ Dockerfiles.
 #     Brand-specific chunks live under .docker/ too — operator may
 #     customize without touching this compose.
 
@@ -289,25 +289,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
-
-  pgweb:
-    build:
-      context: ./.docker/pgweb
-      args:
-        PGWEB_IMAGE: ${PGWEB_IMAGE:-sosedoff/pgweb:latest}
-    container_name: pgweb
-    restart: unless-stopped
-    networks:
-      - lan-network
-      - db-network
-    environment:
-      PGWEB_DATABASE_URL: "postgres://admin:${DB_PASS_ADMIN}@postgres:5432/${PGDATABASE:-csms}?sslmode=disable"
-      PGWEB_URL_PREFIX: pgweb
-      PGWEB_AUTH_USER: admin
-      PGWEB_AUTH_PASS: ${DB_PASS_ADMIN}
-    depends_on:
-      postgres:
-        condition: service_healthy
 
   # ─── DB init + migrate (same image, different entrypoints) ──
   #

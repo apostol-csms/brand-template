@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Rebuild the locally-built images (nginx-certbot, pgbouncer, pgweb, and
+# Rebuild the locally-built images (nginx-certbot, pgbouncer, and
 # landing where the brand has its own). Platform csms-* images are not
 # built here — they come from the registry, see ./install.sh.
 #

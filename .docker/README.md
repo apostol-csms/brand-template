@@ -16,7 +16,6 @@ optional VPN.
 | `auth/` | Stub `auth` placeholder (legacy slot) | `local/<brand>-auth` | identical |
 | `db-migrate/` | Stub for the `db-migrate` compose service | `local/<brand>-db-migrate` | identical |
 | `pgbouncer/` | Postgres connection pool with SCRAM regen | `local/<brand>-pgbouncer` | identical except chargemecar (older entrypoint, leaked SCRAM hashes — security finding #16) |
-| `pgweb/` | Web UI for postgres | `local/<brand>-pgweb` | identical |
 | `postgres/` | Vanilla `postgres:18` + tuned `postgresql.conf` | extends `postgres:18` | `.env` differs (chargemecar=scram, ocpp-css=md5); `postgresql.conf` is host-tuned |
 | `test-run/` | Test harness container | `local/<brand>-test-run` | identical |
 | `wireguard/` | Optional admin VPN (compose profile `vpn`) | `local/<brand>-wireguard` | chargemecar/ocpp-css leak private keys (security finding #17); plugme is clean |
@@ -24,7 +23,7 @@ optional VPN.
 
 ## Provenance
 
-The 4 trivially-shared directories (`auth`, `db-migrate`, `pgweb`,
+The 3 trivially-shared directories (`auth`, `db-migrate`,
 `test-run`) are byte-identical to the live brand-repo copies and were
 copied straight from `ocpp-css/csms/.docker/<sub>/` on 2026-05-04.
 

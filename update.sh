@@ -28,7 +28,7 @@
 #      image. landing is the only brand-built frontend and lives in ../landing)
 #   6. render per-app env via envs/<env>/render.sh, when the brand has one
 #   7. hooks/pre-update.sh
-#   8. docker compose build — landing + local infra (nginx, pgbouncer, pgweb);
+#   8. docker compose build — landing + local infra (nginx, pgbouncer);
 #      with --frontend-only, landing alone
 #   9. docker compose run --rm db-migrate   ← blocking gate
 #      (on failure: exit 2, stack keeps running at old version)
@@ -275,7 +275,7 @@ rebuild_local() {
     # build.  Landing is the sole brand-built frontend.
     SERVICES="landing"
   else
-    SERVICES="landing nginx pgbouncer pgweb"
+    SERVICES="landing nginx pgbouncer"
   fi
   # Drop services not declared in this brand's compose (e.g. plugme has
   # no landing). Skip build entirely if nothing remains buildable.
@@ -466,7 +466,7 @@ rolling_restart() {
   if [[ $FRONTEND_ONLY -eq 1 ]]; then
     UPSTREAM="$SPA_SERVICES"
   else
-    UPSTREAM="backend ai-service $SPA_SERVICES pgbouncer pgweb"
+    UPSTREAM="backend ai-service $SPA_SERVICES pgbouncer"
     LATE="ocpp"
   fi
   # Drop services not declared in the brand's docker-compose.yaml.
