@@ -396,8 +396,9 @@ services:
       PGPORTAPI: 5432
       PGUSERAPI: apibot
       # Track A gateway (T592). Off unless the brand turns it on: `/api/v2`
-      # then goes to csms-api (profile `gateway` below). An unset variable
-      # already meant off (module default); the explicit false only says so.
+      # then goes to platform-service (profile `gateway` below). An unset
+      # variable already meant off (module default); the explicit false only
+      # says so.
       # GATEWAY_ALLOWED_CIDR — the networks a module may register its data
       # plane address in, comma-separated; empty = the image's default
       # (10/8, 172.16/12, 192.168/16) with a backend that reads it, ignored
@@ -641,26 +642,26 @@ services:
     profiles:
       - stripe
 
-  # ─── csms-api: the Go layer of track A (/api/v2), profile `gateway` ────────
+  # ─── platform-service: the Go layer of track A (/api/v2), profile `gateway` ─
   #
   # Compose starts it on the profile alone (COMPOSE_PROFILES lists every
   # profile the brand uses, e.g. vpn,gateway). Turn the profile on only
   # together with GATEWAY_ENABLE=true on the backend — both by the owner's
-  # word per brand: with the gateway off csms-api restarts in a loop and
-  # check.sh fails the update. There is no published image yet (T271):
-  # CSMS_API_IMAGE names one already on the host (pull_policy missing — a
-  # local tag is not pulled), and update.sh does not recreate this service,
-  # so a new image is rolled by hand. Its apibot pool shares pgbouncer's
-  # max_db_connections with daemon and ocpp. Environment as in the root
-  # docker-compose.yaml of the workspace; the control socket stays on
-  # lan-network, the database is reached as apibot through pgbouncer
+  # word per brand: with the gateway off platform-service restarts in a loop
+  # and check.sh fails the update. There is no published image yet (T271):
+  # PLATFORM_SERVICE_IMAGE names one already on the host (pull_policy
+  # missing — a local tag is not pulled), and update.sh does not recreate
+  # this service, so a new image is rolled by hand. Its apibot pool shares
+  # pgbouncer's max_db_connections with daemon and ocpp. Environment as in
+  # the root docker-compose.yaml of the workspace; the control socket stays
+  # on lan-network, the database is reached as apibot through pgbouncer
   # (session pool mode).
-  csms-api:
-    image: ${CSMS_API_IMAGE:-csms-api:local}
-    pull_policy: ${CSMS_API_PULL_POLICY:-missing}
+  platform-service:
+    image: ${PLATFORM_SERVICE_IMAGE:-platform-service:local}
+    pull_policy: ${PLATFORM_SERVICE_PULL_POLICY:-missing}
     profiles: ["gateway"]
     logging: *default-logging
-    container_name: csms-api
+    container_name: platform-service
     networks:
       - lan-network
       - db-network
@@ -671,13 +672,13 @@ services:
       GATEWAY_CLIENT_SECRET: ${OAUTH2_SECRET_SERVICE}
       OAUTH2_TOKEN_URL: http://backend:4977/oauth2/token
       PG_DSN: postgres://apibot:${DB_PASS_APIBOT}@pgbouncer:6432/${PGDATABASE}?sslmode=disable
-      LISTEN_ADDR: ${CSMS_API_LISTEN_ADDR:-:8081}
-      INSTANCE: ${CSMS_API_INSTANCE:-csms-api-1}
-      CAPACITY: ${CSMS_API_CAPACITY:-64}
+      LISTEN_ADDR: ${PLATFORM_SERVICE_LISTEN_ADDR:-:8081}
+      INSTANCE: ${PLATFORM_SERVICE_INSTANCE:-platform-service-1}
+      CAPACITY: ${PLATFORM_SERVICE_CAPACITY:-64}
       JWT_ISSUERS: accounts.${DOMAIN},https://accounts.${DOMAIN}
       JWT_AUDIENCES: web-${DOMAIN}:HS256:${OAUTH2_SECRET_WEB},service-${DOMAIN}:HS256:${OAUTH2_SECRET_SERVICE},android-${DOMAIN}:HS256:${OAUTH2_SECRET_ANDROID},ios-${DOMAIN}:HS256:${OAUTH2_SECRET_IOS}
     healthcheck:
-      test: ["CMD", "/csms-api", "-healthcheck"]
+      test: ["CMD", "/platform-service", "-healthcheck"]
       interval: 10s
       timeout: 5s
       retries: 3
