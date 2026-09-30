@@ -60,15 +60,39 @@ takes `www` along with it:
 ```bash
 D=<your-domain>; EMAIL=<a mailbox you actually read>
 certbot certonly --standalone --non-interactive --agree-tos --email "$EMAIL" \
-  --cert-name "$D" -d "$D" -d "www.$D"
+  --key-type ecdsa --cert-name "$D" -d "$D" -d "www.$D"
 for s in cloud cpo cs admin driver pay auth api ws ocpp; do
   certbot certonly --standalone --non-interactive --agree-tos --email "$EMAIL" \
-    --cert-name "$s.$D" -d "$s.$D"
+    --key-type ecdsa --cert-name "$s.$D" -d "$s.$D"
+done
+# RSA 2048 copies for the hosts stations connect to (T716) — see below
+for s in ocpp ws; do
+  certbot certonly --standalone --non-interactive --agree-tos --email "$EMAIL" \
+    --key-type rsa --rsa-key-size 2048 --cert-name "$s.$D-rsa" -d "$s.$D"
 done
 cp -a /etc/letsencrypt <workspace>/.secrets/letsencrypt   # hooks/pre-install.sh picks it up
 ```
 
-All eleven names must resolve to the host **before** certbot runs — there
+`--key-type ecdsa` is spelled out because certbot 1.x defaults to RSA.
+
+**Two certificates on the stations' hosts.** OCPP-J 1.6 §6.2.1 says the server
+certificate SHALL be RSA ≤ 2048 bits; OCPP 2.0.1 A00.FR.318 requires both ECDSA
+and RSA cipher suites. nginx holds both pairs in the `ocpp.`/`ws.` server blocks
+and serves whichever the station asks for. `tls-rsa` (run by `entrypoint.sh`)
+wires in `/etc/letsencrypt/live/<host>-rsa/` when it exists and **silently falls
+back to ECDSA only** when it does not — a 1.6 station without elliptic curves
+then fails the handshake and never reaches the Central System's log. On a
+running host, issue the copies inside the container:
+
+```bash
+for s in ocpp ws; do
+  docker exec nginx certbot certonly --webroot -w /var/www/certbot --non-interactive \
+    --key-type rsa --rsa-key-size 2048 --cert-name "$s.<domain>-rsa" -d "$s.<domain>"
+done
+docker exec nginx sh -c 'tls-rsa && nginx -t && nginx -s reload'
+```
+
+All twelve names must resolve to the host **before** certbot runs — there
 is no wildcard in the shipped config, and `hooks/pre-install.sh` bakes the
 tree into the nginx image at build time.
 
@@ -161,7 +185,7 @@ cp ~/csms-vault/issued/<code>.license.json .secrets/license.json && chmod 600 $_
 The brand workspace (`brands/<code>/`) is **not** a git repo — the repos
 live one level deeper. `.secrets/` sits beside `csms/`, never inside it.
 
-### 3. DNS — eleven names, before anything else
+### 3. DNS — twelve names, before anything else
 
 There is no wildcard in the shipped nginx config. Point all of these at
 the host and wait for propagation **before** issuing certificates:
@@ -203,7 +227,7 @@ PostgreSQL from starting on a small one.
 
 ### 5. TLS — see "TLS certificates" above
 
-Issue eleven lineages, then pull the tree into the workspace so
+Issue eleven lineages plus the two RSA copies, then pull the tree into the workspace so
 `hooks/pre-install.sh` can bake it into the nginx image:
 
 ```bash

@@ -1,12 +1,13 @@
 {
-  "platform_version": "0.11.1-alpha",
+  "platform_version": "1.22.3",
   "images": {
-    "csms-backend": "ghcr.io/apostol-csms/csms-backend:0.11.1-alpha@sha256:7eb3c8c9756cdc537c4531b52208a9e253dad9aa78e6532b2b150512cba81821",
-    "csms-db": "ghcr.io/apostol-csms/csms-db:0.11.1-alpha@sha256:93ee6ee676f1810097d3e87f16051a30333cd3482c9f5ab2a73a1bc938651c06",
-    "csms-pay": "ghcr.io/apostol-csms/csms-pay:0.11.1-alpha@sha256:bf47ca29395b7a290b6fb03ec2e03ded6a97fe5b30dfa0bb1432b1f0ab0fe1fb",
-    "csms-driver": "ghcr.io/apostol-csms/csms-driver:0.11.1-alpha@sha256:32cd01c7d50d7a1bfcdf05b4e7f11ad7b2dc08e28832a4a4e18b833c37fd89c9",
-    "csms-webapp": "ghcr.io/apostol-csms/csms-webapp:0.11.1-alpha@sha256:cae7376625aec5795ef0530dc787a92df5b6858483f2832534c445c9b0fa6d18",
-    "csms-auth": "ghcr.io/apostol-csms/csms-auth:0.11.1-alpha@sha256:9724b815837164b607858751167b5863a20c6a840b77ddf77f209eaf3c27cf7a",
-    "csms-ocpp": "ghcr.io/apostol-csms/csms-ocpp:0.11.1-alpha@sha256:60bc5359d3e0bf82676e558b3c5f7efdbb55c6e0a084085b24ee6b095e0cdf04"
+    "csms-backend": "ghcr.io/apostol-csms/csms-backend:1.22.3@sha256:20de63c39c185a8480d33f454fc04101c210726e5715099eb6fb30ea3d3970d4",
+    "csms-db":    "ghcr.io/apostol-csms/csms-db:1.22.3@sha256:5f330489396cbca9e52797b9f8773ca1f8dcfb5aaeb0d1cdda3ce3a174be8f3b",
+    "csms-pay":   "ghcr.io/apostol-csms/csms-pay:1.22.3@sha256:edf86c5792472ae6c4a2608645ed7fef69294b5b0343f43fd7c879a79e7a168c",
+    "csms-driver": "ghcr.io/apostol-csms/csms-driver:1.22.3@sha256:e3adfdc46cfd275d3b01237c418c17307cd1216b4bf164c29111eee8701933cd",
+    "csms-webapp": "ghcr.io/apostol-csms/csms-webapp:1.22.3@sha256:8fd2feca795588eda666eec97083f725753354a569365aaa2a7018e8ec1b507e",
+    "csms-auth":  "ghcr.io/apostol-csms/csms-auth:1.22.3@sha256:bc1846750db1d52966f5b53fe934eb8ccd190feb9aa1661ef04bb1e261d08bd8",
+    "csms-ocpp":  "ghcr.io/apostol-csms/csms-ocpp:1.22.3@sha256:7b4e40634d35d452560bcc6ba914c807d399404ad4905fc01bf0f39084c8adaf",
+    "csms-ai-service": "ghcr.io/apostol-csms/csms-ai-service:1.22.3@sha256:4841ac569df2bb701aea9f7c4f24c3c0de80c702b0b6bc010ac5b9f14c6cca54"
   }
 }
