@@ -389,8 +389,9 @@ server {
 
     ssl_certificate /etc/letsencrypt/live/ocpp.${DOMAIN}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/ocpp.${DOMAIN}/privkey.pem;
+    include /etc/nginx/tls/rsa-ocpp.${DOMAIN}.conf;   # T716: RSA 2048 next to ECDSA (tls-rsa.sh)
 
-    include /etc/letsencrypt/options-ssl-nginx.conf;
+    include /etc/nginx/includes/ssl-ocpp.conf;   # T716: certbot defaults + TLS_RSA_* (:7833 п. 6)
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
     ssl_stapling off;
@@ -627,8 +628,9 @@ server {
 
     ssl_certificate /etc/letsencrypt/live/ws.${DOMAIN}/fullchain.pem; # managed by Certbot
     ssl_certificate_key /etc/letsencrypt/live/ws.${DOMAIN}/privkey.pem; # managed by Certbot
+    include /etc/nginx/tls/rsa-ws.${DOMAIN}.conf;   # T716: RSA 2048 next to ECDSA (tls-rsa.sh)
 
-    include /etc/letsencrypt/options-ssl-nginx.conf;
+    include /etc/nginx/includes/ssl-ocpp.conf;   # T716: certbot defaults + TLS_RSA_* (:7833 п. 6)
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
     ssl_stapling off;

@@ -8,6 +8,9 @@ envsubst '$DOMAIN' \
   < /etc/nginx/conf.d/default.conf.template \
   > /etc/nginx/conf.d/default.conf
 
+# T716 — the RSA pair next to ECDSA on the stations' hosts, when issued.
+/usr/local/bin/tls-rsa
+
 # Start nginx
 /usr/sbin/nginx -g 'daemon off;' &
 

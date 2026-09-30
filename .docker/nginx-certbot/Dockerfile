@@ -39,6 +39,8 @@ COPY ./frontend /var/www/frontend
 
 RUN chown root:www-data -R /var/www
 
+COPY ./tls-rsa.sh /usr/local/bin/tls-rsa
+RUN chmod +x /usr/local/bin/tls-rsa
 COPY ./entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
