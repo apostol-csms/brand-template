@@ -241,8 +241,13 @@ services:
       # PL/pgSQL; the default only counts top-level statements.
       - "-c"
       - "shared_preload_libraries=pg_stat_statements"
-    env_file:
-      - ./workdir/.env
+    # T711 — no env_file here. The image reads only POSTGRES_* (below), and
+    # workdir/.env gets PLATFORM_VERSION rewritten on every release: through
+    # env_file that changed postgres' config hash each time, so any compose
+    # call that reached it (`run db-migrate`, docker-up.sh, a spot repair
+    # without --no-deps) recreated the database under a running backend and
+    # threw its log away. It also handed every brand secret to the database
+    # container (T174). Takes effect on the next deliberate recreate.
     environment:
       POSTGRES_DB: ${PGDATABASE:-csms}
       POSTGRES_USER: postgres

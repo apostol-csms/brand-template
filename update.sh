@@ -30,7 +30,8 @@
 #   7. hooks/pre-update.sh
 #   8. docker compose build — landing + local infra (nginx, pgbouncer);
 #      with --frontend-only, landing alone
-#   9. docker compose run --rm db-migrate   ← blocking gate
+#   9. docker compose run --rm --no-deps db-migrate   ← blocking gate
+#      (postgres is started if down but never recreated here — T711)
 #      (on failure: exit 2, stack keeps running at old version)
 #  10. rolling restart, TWO-PHASE: upstreams → wait until SPAs report healthy
 #      → only then nginx (see the comment at rolling_restart for why). Inside
@@ -40,7 +41,8 @@
 #  12. record version (and prev, for --rollback)
 #  13. ./check.sh — note it exits 1 on a mere warning, and this step turns
 #      that into exit 2 for the whole update
-#  14. docker image prune -f
+#  14. remove platform images of versions other than current and previous
+#      (T710), then docker image prune -f
 
 set -euo pipefail
 
@@ -296,8 +298,28 @@ run_db_migrate() {
     log "skip db-migrate (--frontend-only)"
     return 0
   fi
+  # T711 — `compose run` without --no-deps walks depends_on (db-migrate →
+  # db-init → postgres) and RECREATES postgres whenever its config-hash
+  # label disagrees with the current render — measured 30.09 on all four
+  # sites: postgres was recreated on every update, image unchanged, while
+  # backend and ocpp were still running on the old version (they lost the
+  # database under them), and postgres' json log — its only log,
+  # logging_collector=off — went with the old container. So: make sure
+  # postgres is up WITHOUT recreating it, then run the gate alone. db-init is
+  # first-install only (install.sh) and is not re-run here any more.
+  # Consequence: a postgres image or `-c` tuning change in compose no longer
+  # reaches a running stack through update.sh — recreating the database is a
+  # deliberate step of its own (stop backend/ocpp first, save `docker logs`).
+  local PG_SVC
+  PG_SVC="$(filter_present_services postgres)"   # empty with an external database
+  if [[ -n "$PG_SVC" ]]; then
+    # --wait: db-init used to wait for service_healthy on our behalf. Without
+    # it a postgres still starting makes migrate.sh print "does not exist" and
+    # exit 0 — the gate would pass with no patches applied.
+    run compose_cmd up -d --wait --wait-timeout 120 --no-deps --no-recreate "$PG_SVC"
+  fi
   log "run db-migrate (one-shot)"
-  if ! run compose_cmd run --rm db-migrate; then
+  if ! run compose_cmd run --rm --no-deps db-migrate; then
     err "db-migrate FAILED. The stack is still on the previous version. "\
 "Investigate logs, fix, and re-run update.sh. DO NOT force-restart services."
     exit 2
@@ -575,6 +597,46 @@ verify_update() {
 # ─── Step 13: Cleanup ────────────────────────────────────────────────
 
 prune_images() {
+  # T710 — `image prune -f` removes only dangling layers; every release left
+  # a full set of tagged platform images behind (30.09: 257 images, 23.4 GB
+  # reclaimable on prod ocpp-css, 280 on chargemecar, 232 on cpms). Keep the
+  # version just installed and the previous one (--rollback brings it back
+  # without a pull); remove the platform images of every other version.
+  # No -f on rmi: an image a container (even a stopped one) still uses
+  # refuses and stays. Brand-built images (nginx, pgbouncer, landing) and
+  # tools (loadgen) are not matched.
+  local PREV_VER PLATFORM_RE OLD REPOS KEPT=0 REMOVED=0 IMG
+  local PRUNE_OLD
+  PRUNE_OLD="${PRUNE_OLD_PLATFORM_IMAGES:-$(env_get PRUNE_OLD_PLATFORM_IMAGES)}"
+  if [[ "${PRUNE_OLD:-1}" != "1" ]]; then
+    log "skip old platform images (PRUNE_OLD_PLATFORM_IMAGES=$PRUNE_OLD)"
+  else
+    PREV_VER="$(cat "$WORKDIR/.installed-version.prev" 2>/dev/null || true)"
+    # dry-run does not record the version, so .prev is still one step behind
+    if [[ $DRY_RUN -eq 1 && "$INSTALLED_VERSION" != "$PLATFORM_VERSION" ]]; then
+      PREV_VER="$INSTALLED_VERSION"
+    fi
+    PLATFORM_RE='/csms-(backend|ocpp|db|webapp|driver|pay|auth|ai-service):[0-9]+\.[0-9]+\.[0-9]+'
+    # only the repositories THIS stack pulls — another stack on the same host
+    # (graftio on the owner's workstation) keeps its images
+    REPOS="$(compose_cmd config --images 2>/dev/null | sed 's/@.*//; s/:[^:/]*$//' | sort -u)"
+    OLD="$(docker images --format '{{.Repository}}:{{.Tag}}' | grep -E "$PLATFORM_RE" \
+      | awk -F: -v cur="$PLATFORM_VERSION" -v prev="$PREV_VER" '$NF != cur && $NF != prev' \
+      | while read -r IMG; do grep -qxF "${IMG%:*}" <<<"$REPOS" && echo "$IMG"; done || true)"
+    if [[ -n "$OLD" ]]; then
+      log "remove platform images other than $PLATFORM_VERSION / ${PREV_VER:-—}: $(wc -l <<<"$OLD") candidate(s)"
+      while read -r IMG; do
+        if [[ $DRY_RUN -eq 1 ]]; then
+          echo "[dry-run] docker rmi $IMG"
+        elif docker rmi "$IMG" >/dev/null 2>&1; then
+          REMOVED=$((REMOVED + 1))
+        else
+          KEPT=$((KEPT + 1))   # still used by a container (e.g. the exited db-init)
+        fi
+      done <<<"$OLD"
+      [[ $DRY_RUN -eq 1 ]] || log "  removed $REMOVED, kept $KEPT (in use)"
+    fi
+  fi
   log "docker image prune -f"
   run docker image prune -f
 }
