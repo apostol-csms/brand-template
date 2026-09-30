@@ -531,7 +531,7 @@ record_patch_baseline() {
   local PGDB CNT
   PGDB="$(sed -n 's/^PGDATABASE=//p' "$WORKDIR/.env" | tail -1 | sed -e 's/^"//' -e 's/"$//')"
   CNT="$(compose_cmd exec -T postgres psql -U postgres -d "${PGDB:-csms}" \
-           -tAc 'SELECT count(*) FROM db.patch_log' 2>/dev/null | tr -dc '0-9')"
+           -tAc 'SELECT count(*) FROM db.patch_log' 2>/dev/null | tr -dc '0-9' || true)"
   if [[ -n "$CNT" ]]; then
     echo "$CNT" > "$WORKDIR/.patch-count"
     log "patch baseline: $CNT"
