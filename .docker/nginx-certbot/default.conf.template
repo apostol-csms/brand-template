@@ -65,8 +65,7 @@ server {
 # ─── cloud.${DOMAIN} ───────────────────────────────────────────────────
 
 server {
-    listen 443 ssl;
-${NGINX_PROXY_LISTEN_LINE}
+    listen 443 ssl$NGINX_PROXY_PROTO_OPTS;
 
     server_name cloud.${DOMAIN};
 
@@ -89,8 +88,7 @@ ${NGINX_PROXY_LISTEN_LINE}
 # Everything else → minimal landing page or redirect.
 
 server {
-    listen 443 ssl;
-${NGINX_PROXY_LISTEN_LINE}
+    listen 443 ssl$NGINX_PROXY_PROTO_OPTS;
 
     server_name pay.${DOMAIN};
 
@@ -225,8 +223,7 @@ ${NGINX_PROXY_LISTEN_LINE}
 # ─── api.${DOMAIN} ───────────────────────────────────────────────────
 
 server {
-    listen 443 ssl;
-${NGINX_PROXY_LISTEN_LINE}
+    listen 443 ssl$NGINX_PROXY_PROTO_OPTS;
 
     server_name api.${DOMAIN};
 
@@ -246,8 +243,7 @@ ${NGINX_PROXY_LISTEN_LINE}
 # ─── cpo.${DOMAIN} ─────────────────────────────────────────────────────
 
 server {
-    listen 443 ssl;
-${NGINX_PROXY_LISTEN_LINE}
+    listen 443 ssl$NGINX_PROXY_PROTO_OPTS;
 
     server_name cpo.${DOMAIN};
 
@@ -269,8 +265,7 @@ ${NGINX_PROXY_LISTEN_LINE}
 # Authenticated via OAuth2 (cookie-based), WebSocket via ws.${DOMAIN}.
 
 server {
-    listen 443 ssl;
-${NGINX_PROXY_LISTEN_LINE}
+    listen 443 ssl$NGINX_PROXY_PROTO_OPTS;
 
     server_name driver.${DOMAIN};
 
@@ -319,8 +314,7 @@ ${NGINX_PROXY_LISTEN_LINE}
 # ─── admin.${DOMAIN} ───────────────────────────────────────────────────
 
 server {
-    listen 443 ssl;
-${NGINX_PROXY_LISTEN_LINE}
+    listen 443 ssl$NGINX_PROXY_PROTO_OPTS;
 
     server_name admin.${DOMAIN};
 
@@ -341,8 +335,7 @@ ${NGINX_PROXY_LISTEN_LINE}
 # CS Web UI Pro — frontend + backend API + CS REST API proxy to OCPP service
 
 server {
-    listen 443 ssl;
-${NGINX_PROXY_LISTEN_LINE}
+    listen 443 ssl$NGINX_PROXY_PROTO_OPTS;
 
     server_name cs.${DOMAIN};
 
@@ -390,8 +383,7 @@ ${NGINX_PROXY_LISTEN_LINE}
 # OCPP Central System (WebSocket + REST API)
 
 server {
-    listen 443 ssl;
-${NGINX_PROXY_LISTEN_LINE}
+    listen 443 ssl$NGINX_PROXY_PROTO_OPTS;
 
     server_name ocpp.${DOMAIN};
 
@@ -487,8 +479,7 @@ ${NGINX_PROXY_LISTEN_LINE}
 # OAuth2 Auth App (standalone Vue SPA)
 
 server {
-    listen 443 ssl;
-${NGINX_PROXY_LISTEN_LINE}
+    listen 443 ssl$NGINX_PROXY_PROTO_OPTS;
 
     server_name auth.${DOMAIN};
 
@@ -569,8 +560,7 @@ ${NGINX_PROXY_LISTEN_LINE}
 # ─── ${DOMAIN} ─────────────────────────────────────────────────
 
 server {
-    listen 443 ssl;
-${NGINX_PROXY_LISTEN_LINE}
+    listen 443 ssl$NGINX_PROXY_PROTO_OPTS;
 
     server_name ${DOMAIN} www.${DOMAIN};
 
@@ -615,8 +605,7 @@ ${NGINX_PROXY_LISTEN_LINE}
 server {
     listen 80;
     listen [::]:80;
-    listen 443 ssl;
-${NGINX_PROXY_LISTEN_LINE}
+    listen 443 ssl$NGINX_PROXY_PROTO_OPTS;
 
     server_name ws.${DOMAIN};
 

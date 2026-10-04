@@ -106,8 +106,6 @@ services:
     ports:
       - "80:80"
       - "443:443"
-      # PROXY-protocol edge listener (active only when the template renders it).
-      - "8443:8443"
     # Every proxied WebSocket costs one ephemeral port on the upstream side,
     # and the kernel default range holds 28 232 of them — a ceiling that shows
     # up only once a deployment passes roughly that many charging stations, as

@@ -8,21 +8,23 @@ set -e
 # re-check via X-Real-IP). Two modes, both opt-in, EMPTY BY DEFAULT —
 # directly attached brands keep $remote_addr as the client IP:
 #   NGINX_PROXY_PROTOCOL=on   L4 edge with PROXY protocol (TLS passthrough):
-#                             accept the real IP on the dedicated 8443
-#                             listener (real_ip_header proxy_protocol).
+#                             the public 443 listener requires the PROXY
+#                             header (real_ip_header proxy_protocol).
 #   NGINX_REAL_IP_TRUSTED     Space-separated CIDRs of the edge whose header
 #                             is trusted — and nothing else.
 # For an XFF (L7) edge: the edge must OVERWRITE X-Forwarded-For — an
 # appending edge leaves the allowlist spoofable via a client-supplied XFF.
 
-export NGINX_PROXY_LISTEN_LINE=""
+export NGINX_PROXY_PROTO_OPTS=""
 REAL_IP_RECURSIVE="real_ip_recursive on;"
 REAL_IP_HEADER="X-Forwarded-For"
 if [ "${NGINX_PROXY_PROTOCOL:-}" = "on" ]; then
-  # PROXY protocol edge (e.g. cloud.ru L4 LB with TLS passthrough): accept
-  # the real client IP from the PROXY header on the dedicated 8443 listener
-  # and prefer it over any client-supplied X-Forwarded-For value.
-  NGINX_PROXY_LISTEN_LINE="    listen 8443 ssl proxy_protocol;"
+  # PROXY protocol edge (e.g. cloud.ru L4 LB with TLS passthrough): the
+  # public 443 listener requires the PROXY header and nginx restores the
+  # real client IP from it, preferring it over any client-supplied
+  # X-Forwarded-For value. Cutover is one action on the LB side; the gap
+  # until then is a short, accepted outage (testing stands).
+  NGINX_PROXY_PROTO_OPTS=" proxy_protocol"
   REAL_IP_RECURSIVE=""
   REAL_IP_HEADER="proxy_protocol"
 fi
@@ -39,9 +41,9 @@ else
   : > "$REAL_IP_CONF"
 fi
 
-# Render default.conf from template. envsubst whitelists $DOMAIN, $ALT_DOMAIN (where present) and $NGINX_PROXY_LISTEN_LINE so unrelated `$variable` strings survive untouched.
+# Render default.conf from template. envsubst whitelists $DOMAIN, $ALT_DOMAIN (where present) and $NGINX_PROXY_PROTO_OPTS so unrelated `$variable` strings survive untouched.
 export DOMAIN="${DOMAIN:-localhost}"
-envsubst '$DOMAIN $NGINX_PROXY_LISTEN_LINE' \
+envsubst '$DOMAIN $NGINX_PROXY_PROTO_OPTS' \
   < /etc/nginx/conf.d/default.conf.template \
   > /etc/nginx/conf.d/default.conf
 
