@@ -2,24 +2,35 @@
 
 set -e
 
-# Render default.conf from template using $DOMAIN.
-export DOMAIN="${DOMAIN:-localhost}"
-envsubst '$DOMAIN' \
-  < /etc/nginx/conf.d/default.conf.template \
-  > /etc/nginx/conf.d/default.conf
+# Trusted edge in front of the node (customer load balancer that SNATs
+# inbound traffic): restore the real client IP for the two-layer
+# /yookassa/callback YooKassa-IP allowlist (nginx allow/deny + the DB-layer
+# re-check via X-Real-IP). Two modes, both opt-in, EMPTY BY DEFAULT —
+# directly attached brands keep $remote_addr as the client IP:
+#   NGINX_PROXY_PROTOCOL=on   L4 edge with PROXY protocol (TLS passthrough):
+#                             accept the real IP on the dedicated 8443
+#                             listener (real_ip_header proxy_protocol).
+#   NGINX_REAL_IP_TRUSTED     Space-separated CIDRs of the edge whose header
+#                             is trusted — and nothing else.
+# For an XFF (L7) edge: the edge must OVERWRITE X-Forwarded-For — an
+# appending edge leaves the allowlist spoofable via a client-supplied XFF.
 
-# Trusted edge in front of the node (e.g. a customer L7 load balancer that
-# SNATs inbound traffic): restore the real client IP from X-Forwarded-For.
-# Space-separated CIDR list in NGINX_REAL_IP_TRUSTED. EMPTY BY DEFAULT —
-# directly attached brands keep $remote_addr as the client IP, and the
-# /yookassa/callback allowlist keeps working off it. Enable only for a brand
-# whose edge OVERWRITES X-Forwarded-For: an edge that merely appends leaves
-# the allowlist spoofable through a client-supplied XFF header.
+export NGINX_PROXY_LISTEN_LINE=""
+REAL_IP_RECURSIVE="real_ip_recursive on;"
+REAL_IP_HEADER="X-Forwarded-For"
+if [ "${NGINX_PROXY_PROTOCOL:-}" = "on" ]; then
+  # PROXY protocol edge (e.g. cloud.ru L4 LB with TLS passthrough): accept
+  # the real client IP from the PROXY header on the dedicated 8443 listener
+  # and prefer it over any client-supplied X-Forwarded-For value.
+  NGINX_PROXY_LISTEN_LINE="    listen 8443 ssl proxy_protocol;"
+  REAL_IP_RECURSIVE=""
+  REAL_IP_HEADER="proxy_protocol"
+fi
 REAL_IP_CONF=/etc/nginx/conf.d/real-ip.conf
 if [ -n "$NGINX_REAL_IP_TRUSTED" ]; then
   {
-    echo 'real_ip_header X-Forwarded-For;'
-    echo 'real_ip_recursive on;'
+    echo "real_ip_header $REAL_IP_HEADER;"
+    [ -n "$REAL_IP_RECURSIVE" ] && echo "$REAL_IP_RECURSIVE"
     for cidr in $NGINX_REAL_IP_TRUSTED; do
       echo "set_real_ip_from $cidr;"
     done
@@ -27,6 +38,12 @@ if [ -n "$NGINX_REAL_IP_TRUSTED" ]; then
 else
   : > "$REAL_IP_CONF"
 fi
+
+# Render default.conf from template. envsubst whitelists $DOMAIN, $ALT_DOMAIN (where present) and $NGINX_PROXY_LISTEN_LINE so unrelated `$variable` strings survive untouched.
+export DOMAIN="${DOMAIN:-localhost}"
+envsubst '$DOMAIN $NGINX_PROXY_LISTEN_LINE' \
+  < /etc/nginx/conf.d/default.conf.template \
+  > /etc/nginx/conf.d/default.conf
 
 # T716 — the RSA pair next to ECDSA on the stations' hosts, when issued.
 /usr/local/bin/tls-rsa

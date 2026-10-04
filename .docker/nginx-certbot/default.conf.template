@@ -66,6 +66,7 @@ server {
 
 server {
     listen 443 ssl;
+${NGINX_PROXY_LISTEN_LINE}
 
     server_name cloud.${DOMAIN};
 
@@ -89,6 +90,7 @@ server {
 
 server {
     listen 443 ssl;
+${NGINX_PROXY_LISTEN_LINE}
 
     server_name pay.${DOMAIN};
 
@@ -224,6 +226,7 @@ server {
 
 server {
     listen 443 ssl;
+${NGINX_PROXY_LISTEN_LINE}
 
     server_name api.${DOMAIN};
 
@@ -244,6 +247,7 @@ server {
 
 server {
     listen 443 ssl;
+${NGINX_PROXY_LISTEN_LINE}
 
     server_name cpo.${DOMAIN};
 
@@ -266,6 +270,7 @@ server {
 
 server {
     listen 443 ssl;
+${NGINX_PROXY_LISTEN_LINE}
 
     server_name driver.${DOMAIN};
 
@@ -315,6 +320,7 @@ server {
 
 server {
     listen 443 ssl;
+${NGINX_PROXY_LISTEN_LINE}
 
     server_name admin.${DOMAIN};
 
@@ -336,6 +342,7 @@ server {
 
 server {
     listen 443 ssl;
+${NGINX_PROXY_LISTEN_LINE}
 
     server_name cs.${DOMAIN};
 
@@ -384,6 +391,7 @@ server {
 
 server {
     listen 443 ssl;
+${NGINX_PROXY_LISTEN_LINE}
 
     server_name ocpp.${DOMAIN};
 
@@ -480,6 +488,7 @@ server {
 
 server {
     listen 443 ssl;
+${NGINX_PROXY_LISTEN_LINE}
 
     server_name auth.${DOMAIN};
 
@@ -561,6 +570,7 @@ server {
 
 server {
     listen 443 ssl;
+${NGINX_PROXY_LISTEN_LINE}
 
     server_name ${DOMAIN} www.${DOMAIN};
 
@@ -606,6 +616,7 @@ server {
     listen 80;
     listen [::]:80;
     listen 443 ssl;
+${NGINX_PROXY_LISTEN_LINE}
 
     server_name ws.${DOMAIN};
 
