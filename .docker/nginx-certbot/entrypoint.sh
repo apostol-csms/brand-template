@@ -28,6 +28,8 @@ if [ "${NGINX_PROXY_PROTOCOL:-}" = "on" ]; then
   REAL_IP_RECURSIVE=""
   REAL_IP_HEADER="proxy_protocol"
 fi
+# workdir/.env is also bash-sourced in places: the value may arrive quoted.
+NGINX_REAL_IP_TRUSTED="${NGINX_REAL_IP_TRUSTED//[\"\']}"
 REAL_IP_CONF=/etc/nginx/conf.d/real-ip.conf
 if [ -n "$NGINX_REAL_IP_TRUSTED" ]; then
   {

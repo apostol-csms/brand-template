@@ -87,7 +87,8 @@ services:
     hostname: ${DOMAIN:-localhost}
     environment:
       DOMAIN: ${DOMAIN:-localhost}
-      # Trusted edge CIDRs that restore the real client IP from XFF (empty = off).
+      # Trusted edge: restore the real client IP (PROXY protocol or XFF).
+      NGINX_PROXY_PROTOCOL: ${NGINX_PROXY_PROTOCOL:-}
       NGINX_REAL_IP_TRUSTED: ${NGINX_REAL_IP_TRUSTED:-}
     networks:
       wan-network:
