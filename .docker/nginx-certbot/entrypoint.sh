@@ -8,6 +8,26 @@ envsubst '$DOMAIN' \
   < /etc/nginx/conf.d/default.conf.template \
   > /etc/nginx/conf.d/default.conf
 
+# Trusted edge in front of the node (e.g. a customer L7 load balancer that
+# SNATs inbound traffic): restore the real client IP from X-Forwarded-For.
+# Space-separated CIDR list in NGINX_REAL_IP_TRUSTED. EMPTY BY DEFAULT —
+# directly attached brands keep $remote_addr as the client IP, and the
+# /yookassa/callback allowlist keeps working off it. Enable only for a brand
+# whose edge OVERWRITES X-Forwarded-For: an edge that merely appends leaves
+# the allowlist spoofable through a client-supplied XFF header.
+REAL_IP_CONF=/etc/nginx/conf.d/real-ip.conf
+if [ -n "$NGINX_REAL_IP_TRUSTED" ]; then
+  {
+    echo 'real_ip_header X-Forwarded-For;'
+    echo 'real_ip_recursive on;'
+    for cidr in $NGINX_REAL_IP_TRUSTED; do
+      echo "set_real_ip_from $cidr;"
+    done
+  } > "$REAL_IP_CONF"
+else
+  : > "$REAL_IP_CONF"
+fi
+
 # T716 — the RSA pair next to ECDSA on the stations' hosts, when issued.
 /usr/local/bin/tls-rsa
 
