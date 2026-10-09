@@ -565,7 +565,15 @@ pull_images() {
   # `compose pull` reads images from compose itself — picks up
   # PLATFORM_VERSION from workdir/.env automatically.  Brand-specific
   # `landing` (build: context) is skipped by --ignore-buildable.
+  # Profile-restricted services are not in the default pull set — with
+  # the `gateway` profile on (new brands since T752), pull
+  # platform-service explicitly so the first boot never meets a missing
+  # image.
   run docker compose --env-file "$WORKDIR/.env" pull --ignore-buildable
+  if [[ ",$(env_get COMPOSE_PROFILES || true)," == *",gateway,"* ]]; then
+    log "gateway profile active — pull platform-service explicitly"
+    run docker compose --env-file "$WORKDIR/.env" pull --ignore-buildable platform-service
+  fi
 }
 
 # ─── Step 9: Build infra + landing ───────────────────────────────────

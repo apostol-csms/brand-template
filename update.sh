@@ -36,7 +36,10 @@
 #  10. rolling restart, TWO-PHASE: upstreams → wait until SPAs report healthy
 #      → only then nginx (see the comment at rolling_restart for why). Inside
 #      phase 1 ocpp waits for backend: it is recreated only once the new
-#      backend is subscribed to LISTEN (see wait_backend_listening, T578)
+#      backend is subscribed to LISTEN (see wait_backend_listening, T578).
+#      platform-service (the Go /api/v2 service, profile `gateway`) rides
+#      phase 1a last, after backend + pgbouncer — filter_present_services
+#      drops it automatically where the profile is off (T752)
 #  11. hooks/post-update.sh
 #  12. record version (and prev, for --rollback)
 #  13. ./check.sh — note it exits 1 on a mere warning, and this step turns
@@ -255,8 +258,17 @@ pull_images() {
   log "pull all platform images for $PLATFORM_VERSION (Phase 10)"
   # `compose pull` reads images from compose itself — picks up
   # PLATFORM_VERSION from workdir/.env automatically and skips the
-  # remaining build: contexts (landing + infra).
+  # remaining build: contexts (landing + infra). Profile-restricted
+  # services (platform-service on `gateway`) are not in the default
+  # pull set — pull them explicitly with their profile so an enabled
+  # brand never falls back to a stale local tag.
   run compose_cmd pull --ignore-buildable
+  local PROFILES
+  PROFILES="$(env_get COMPOSE_PROFILES || true)"
+  if [[ ",${PROFILES:-}," == *",gateway,"* ]]; then
+    log "gateway profile active — pull platform-service explicitly"
+    run compose_cmd pull --ignore-buildable platform-service
+  fi
 }
 
 # ─── Step 6: Update brand-specific sources (landing only) ────────────
@@ -488,7 +500,7 @@ rolling_restart() {
   if [[ $FRONTEND_ONLY -eq 1 ]]; then
     UPSTREAM="$SPA_SERVICES"
   else
-    UPSTREAM="backend ai-service $SPA_SERVICES pgbouncer"
+    UPSTREAM="backend ai-service $SPA_SERVICES pgbouncer platform-service"
     LATE="ocpp"
   fi
   # Drop services not declared in the brand's docker-compose.yaml.
@@ -616,7 +628,7 @@ prune_images() {
     if [[ $DRY_RUN -eq 1 && "$INSTALLED_VERSION" != "$PLATFORM_VERSION" ]]; then
       PREV_VER="$INSTALLED_VERSION"
     fi
-    PLATFORM_RE='/csms-(backend|ocpp|db|webapp|driver|pay|auth|ai-service):[0-9]+\.[0-9]+\.[0-9]+'
+    PLATFORM_RE='/csms-(backend|ocpp|db|webapp|driver|pay|auth|ai-service|platform-service):[0-9]+\.[0-9]+\.[0-9]+'
     # only the repositories THIS stack pulls — another stack on the same host
     # (graftio on the owner's workstation) keeps its images
     REPOS="$(compose_cmd config --images 2>/dev/null | sed 's/@.*//; s/:[^:/]*$//' | sort -u)"

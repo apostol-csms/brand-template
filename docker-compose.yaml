@@ -637,17 +637,18 @@ services:
   # profile the brand uses, e.g. vpn,gateway). Turn the profile on only
   # together with GATEWAY_ENABLE=true on the backend — both by the owner's
   # word per brand: with the gateway off platform-service restarts in a loop
-  # and check.sh fails the update. There is no published image yet (T271):
-  # PLATFORM_SERVICE_IMAGE names one already on the host (pull_policy
-  # missing — a local tag is not pulled), and update.sh does not recreate
-  # this service, so a new image is rolled by hand. Its apibot pool shares
-  # pgbouncer's max_db_connections with daemon and ocpp. Environment as in
-  # the root docker-compose.yaml of the workspace; the control socket stays
-  # on lan-network, the database is reached as apibot through pgbouncer
-  # (session pool mode).
+  # and check.sh fails the update. Image csms-platform-service is published
+  # by the apostol-csms/go release.yml since T752 and pinned by
+  # PLATFORM_VERSION like the rest of the csms-* family (override
+  # PLATFORM_SERVICE_IMAGE for a local build, e.g. dev without a published
+  # tag). update.sh recreates the service in phase 1a together with
+  # backend/pgbouncer. Its apibot pool shares pgbouncer's max_db_connections
+  # with daemon and ocpp. Environment as in the root docker-compose.yaml of
+  # the workspace; the control socket stays on lan-network, the database is
+  # reached as apibot through pgbouncer (session pool mode).
   platform-service:
-    image: ${PLATFORM_SERVICE_IMAGE:-platform-service:local}
-    pull_policy: ${PLATFORM_SERVICE_PULL_POLICY:-missing}
+    image: ${PLATFORM_SERVICE_IMAGE:-${REGISTRY:-ghcr.io/apostol-csms}/csms-platform-service:${PLATFORM_VERSION:-latest}}
+    pull_policy: ${PLATFORM_SERVICE_PULL_POLICY:-always}
     profiles: ["gateway"]
     logging: *default-logging
     container_name: platform-service
