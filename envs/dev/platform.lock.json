@@ -9,6 +9,6 @@
     "csms-auth":          "ghcr.io/apostol-csms/csms-auth:1.22.6@sha256:da8b0148e5df8ace3406a3af3c971e5bad286e3f56c96e2f36b538050c237d66",
     "csms-ocpp":          "ghcr.io/apostol-csms/csms-ocpp:1.22.6@sha256:5f39751eef218e119e92b9bfbdfb85889b0b7cf2529086fc169f91e529ce68dd",
     "csms-ai-service":    "ghcr.io/apostol-csms/csms-ai-service:1.22.6@sha256:4cde587e40caa07bad439299d18a0a52a3fe69ef8c190707f093474dccf10bbc",
-    "csms-platform-service": "ghcr.io/apostol-csms/csms-platform-service:1.22.6@sha256:a7420c93adc83952a4d0c9382baa7fafd29c21b9fc937249e8431fe24baa8a41"
+        "platform-service": "ghcr.io/apostol-csms/platform-service:1.22.6@sha256:a7420c93adc83952a4d0c9382baa7fafd29c21b9fc937249e8431fe24baa8a41"
   }
 }

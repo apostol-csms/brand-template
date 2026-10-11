@@ -628,7 +628,7 @@ prune_images() {
     if [[ $DRY_RUN -eq 1 && "$INSTALLED_VERSION" != "$PLATFORM_VERSION" ]]; then
       PREV_VER="$INSTALLED_VERSION"
     fi
-    PLATFORM_RE='/csms-(backend|ocpp|db|webapp|driver|pay|auth|ai-service|platform-service):[0-9]+\.[0-9]+\.[0-9]+'
+    PLATFORM_RE='/(csms-(backend|ocpp|db|webapp|driver|pay|auth|ai-service)|platform-service):[0-9]+\.[0-9]+\.[0-9]+'
     # only the repositories THIS stack pulls — another stack on the same host
     # (graftio on the owner's workstation) keeps its images
     REPOS="$(compose_cmd config --images 2>/dev/null | sed 's/@.*//; s/:[^:/]*$//' | sort -u)"
