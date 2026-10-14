@@ -661,7 +661,7 @@ services:
       GATEWAY_CLIENT_ID: service-${DOMAIN}
       GATEWAY_CLIENT_SECRET: ${OAUTH2_SECRET_SERVICE}
       OAUTH2_TOKEN_URL: http://backend:4977/oauth2/token
-      PG_DSN: postgres://apibot:${DB_PASS_APIBOT}@pgbouncer:6432/${PGDATABASE}?sslmode=disable
+      PG_DSN: postgres://apibot:${DB_PASS_APIBOT}@pgbouncer:6432/${PGDATABASE}?sslmode=disable&pool_max_conns=${PLATFORM_SERVICE_PG_POOL_MAX:-4}
       LISTEN_ADDR: ${PLATFORM_SERVICE_LISTEN_ADDR:-:8081}
       INSTANCE: ${PLATFORM_SERVICE_INSTANCE:-platform-service-1}
       CAPACITY: ${PLATFORM_SERVICE_CAPACITY:-64}
