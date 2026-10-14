@@ -642,10 +642,13 @@ services:
   # PLATFORM_VERSION like the rest of the csms-* family (override
   # PLATFORM_SERVICE_IMAGE for a local build, e.g. dev without a published
   # tag). update.sh recreates the service in phase 1a together with
-  # backend/pgbouncer. Its apibot pool shares pgbouncer's max_db_connections
-  # with daemon and ocpp. Environment as in the root docker-compose.yaml of
-  # the workspace; the control socket stays on lan-network, the database is
-  # reached as apibot through pgbouncer (session pool mode).
+  # backend/pgbouncer. Its daemon pool (the `daemon` role, T798) shares
+  # pgbouncer's max_db_connections with apibot and ocpp. Environment as in
+  # the root docker-compose.yaml of the workspace; the control socket stays
+  # on lan-network, the database is
+  # reached as daemon through pgbouncer (session pool mode) — NOT apibot: the
+  # tenant gate and the method-right check of CheckObjectAccess /
+  # ExecuteMethod are skipped for session_user apibot (T798).
   platform-service:
     image: ${PLATFORM_SERVICE_IMAGE:-${REGISTRY:-ghcr.io/apostol-csms}/csms-platform-service:${PLATFORM_VERSION:-latest}}
     pull_policy: ${PLATFORM_SERVICE_PULL_POLICY:-always}
@@ -661,7 +664,7 @@ services:
       GATEWAY_CLIENT_ID: service-${DOMAIN}
       GATEWAY_CLIENT_SECRET: ${OAUTH2_SECRET_SERVICE}
       OAUTH2_TOKEN_URL: http://backend:4977/oauth2/token
-      PG_DSN: postgres://apibot:${DB_PASS_APIBOT}@pgbouncer:6432/${PGDATABASE}?sslmode=disable&pool_max_conns=${PLATFORM_SERVICE_PG_POOL_MAX:-4}
+      PG_DSN: postgres://daemon:${DB_PASS_DAEMON}@pgbouncer:6432/${PGDATABASE}?sslmode=disable&pool_max_conns=${PLATFORM_SERVICE_PG_POOL_MAX:-4}
       LISTEN_ADDR: ${PLATFORM_SERVICE_LISTEN_ADDR:-:8081}
       INSTANCE: ${PLATFORM_SERVICE_INSTANCE:-platform-service-1}
       CAPACITY: ${PLATFORM_SERVICE_CAPACITY:-64}
