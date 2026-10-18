@@ -95,7 +95,11 @@ echo "hook/pre-update: ensuring pgbouncer auth role"
 # Тем же приёмом это решено в db/sql/pgbouncer.psql (там и комментарий).
 $COMPOSE exec -T postgres psql -v ON_ERROR_STOP=1 -U postgres \
     -d "${PGDATABASE:-csms}" -v pgbpass="$DB_PASS_PGBOUNCER" <<SQL
+-- Результат set_config() — это само значение пароля: без \o psql печатает его
+-- таблицей в вывод выката (терминал, журналы). Ошибки идут в stderr и не гасятся.
+\o /dev/null
 SELECT set_config('password.pgbouncer', :'pgbpass', false);
+\o
 
 DO \$\$
 DECLARE
