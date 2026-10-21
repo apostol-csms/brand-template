@@ -398,14 +398,54 @@ Symmetric to install.sh but for existing deployments:
 6. `git fetch` + `git checkout` new refs in `workdir/{db,frontend}`.
 7. Pre-update hook.
 8. `docker compose build` (locally-built images). `--frontend-only` narrows to webapp/driver/pay/landing.
-9. **`docker compose run --rm db-migrate`** — blocking gate. On failure, exits 2 and **leaves the stack on the previous version**. Operator investigates, fixes, re-runs.
+9. **`docker compose run --rm --no-deps db-migrate`** — blocking gate. On failure, exits 2 and **leaves the stack on the previous version**. Operator investigates, fixes, re-runs. postgres is started first if it is down, but **never recreated** — see "Recreating postgres" below.
 10. Rolling restart — `up -d --no-deps --force-recreate <services>`.
 11. Post-update hook.
 12. Record `.installed-version.prev` ← old, `.installed-version` ← new.
+    Then compare the running postgres container with the compose render: another postgres version under the tag or a changed `-c` setting that the run did not apply is printed as `WARN: postgres: … — NOT applied`; an upstream rebuild of the same version or an environment-only difference as a plain log line. A report only — it does not change the exit code.
 13. `./check.sh` (fails update on exit 2).
 14. `docker image prune -f`.
 
 Flags: `--platform=<ver>`, `--frontend-only`, `--diff-compose`, `--rollback`, `--dry-run`.
+
+### Recreating postgres
+
+`update.sh` never recreates the database container: its server log lives in the container (`docker logs`)
+and is lost with it, and recreating it under a running backend drops every connection. The price is that
+a postgres change — a new postgres version under the tag, or a `-c` setting such as `PG_MAX_CONNECTIONS`
+in `workdir/.env` — reaches a running stack only when you recreate postgres yourself. `update.sh` lists
+what is pending: `WARN: postgres: … — NOT applied` for a setting or another postgres version; a plain
+log line for an upstream rebuild of the same version or a difference in the environment only.
+
+**Anything else that runs compose on postgres recreates it the moment its config or image differs** (a tag
+moved by `compose pull` counts, even when `config-hash` matches): `docker-up.sh`, a plain
+`docker compose up -d`, `--force-recreate`, a spot repair without `--no-recreate`. On an existing
+deployment use `--no-deps --no-recreate` for postgres, or recreate it deliberately, in a maintenance
+window. **Minor versions and `-c` settings only:** another major version (18 → 19) looks for a different
+data directory and starts an empty cluster on the same volume — that is `pg_upgrade`, not this.
+
+```bash
+DC="docker compose --env-file workdir/.env"
+DB="$(sed -n 's/^PGDATABASE=//p' workdir/.env | tail -1 | tr -d '"')"
+BK=/root/backup-pg; umask 077; mkdir -p "$BK"                         # outside the repo
+GW="$($DC config --services | grep -x platform-service || true)"     # the /api/v2 service, if enabled
+docker exec postgres pg_dump -U postgres -Fc "$DB" > "$BK/$DB-$(date +%F).dump"   # 1. dump first
+docker exec -i postgres pg_restore -l < "$BK/$DB-$(date +%F).dump" > /dev/null   #    … and check it reads
+docker logs postgres > "$BK/postgres-$(date +%F).log" 2>&1            # 2. keep the server log
+$DC stop backend ocpp $GW                                             # 3. nobody writes
+docker exec postgres psql -U postgres -c CHECKPOINT                   # 4. a short shutdown
+$DC up -d --wait --no-deps --force-recreate --timeout 120 postgres    #    ~a minute of downtime
+$DC up -d --wait --no-deps --force-recreate pgbouncer
+$DC up -d --no-deps backend                                           # 5. backend first, and
+until docker exec postgres psql -U postgres -d "$DB" -tAc "SELECT string_agg(usename || ' ' || n, ', ' ORDER BY usename)
+        FROM (SELECT usename, count(*) n FROM pg_stat_activity
+               WHERE datname = current_database() AND state = 'idle' AND query ILIKE 'LISTEN%' GROUP BY 1) l" \
+      | tee /dev/stderr | grep -q 'apibot 3'; do sleep 2; done          #    wait: apibot 3, daemon ≥ 1
+$DC up -d --no-deps ocpp $GW                                          #    only then ocpp
+./check.sh                                                            # 6. verify
+```
+
+The next `update.sh` prints `postgres: running container matches compose`.
 
 ### check.sh — health verification
 

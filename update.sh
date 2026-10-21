@@ -42,6 +42,8 @@
 #      drops it automatically where the profile is off (T752)
 #  11. hooks/post-update.sh
 #  12. record version (and prev, for --rollback)
+#      — then report postgres config this run left unapplied (a new image,
+#      a changed `-c` setting): postgres is never recreated here. Report only.
 #  13. ./check.sh — note it exits 1 on a mere warning, and this step turns
 #      that into exit 2 for the whole update
 #  14. remove platform images of versions other than current and previous
@@ -575,6 +577,110 @@ record_version() {
   echo "$PLATFORM_VERSION" > "$WORKDIR/.installed-version"
 }
 
+# ─── Step 11b: Report postgres config not applied ────────────────────
+#
+# run_db_migrate never recreates postgres, so a new postgres image (a moved
+# tag included) or a changed `-c` setting — PG_MAX_CONNECTIONS in
+# workdir/.env, say — stays on paper: compose renders 150, SHOW says 100.
+# Compare the running container with the render and say what differs.
+# Report only: it never fails the update (a check.sh warning would, via
+# verify_update) — applying the change is a deliberate recreate.
+# Image (by id: compose pull moves the tag) and command are compared item by
+# item, the environment only by variable names — values never reach jq or the
+# output; the config-hash label catches whatever else differs. `-c` values
+# are printed as they are: keep secrets out of postgres' command line.
+
+report_postgres_drift() {
+  local PG_SVC CID WANT HAVE HAVE_HASH WANT_HASH IMG_ENV WANT_IMG LINES L
+  # Values are stripped where they are read: the render carries
+  # POSTGRES_PASSWORD, an old container every brand secret, and jq gets its
+  # input in argv. Environment by name; PG_VERSION is kept, it is no secret.
+  local ENV_NAMES='[(. // [])[] | if startswith("PG_VERSION=") then . else split("=")[0] end]'
+  PG_SVC="$(filter_present_services postgres)"
+  [[ -n "$PG_SVC" ]] || return 0   # external database
+  CID="$(compose_cmd ps -aq "$PG_SVC" 2>/dev/null | head -n 1)" || CID=""
+  if [[ -z "$CID" ]]; then
+    log "postgres: no container — nothing to compare"
+    return 0
+  fi
+  WANT="$(compose_cmd config --format json "$PG_SVC" 2>/dev/null | jq -c --arg s "$PG_SVC" '
+    .services[$s] | {image, command, environment: ((.environment // {}) | keys)}' 2>/dev/null)" || WANT=""
+  HAVE="$(docker inspect "$CID" 2>/dev/null | jq -c ".[0] | {Image, Config: {
+    Image: .Config.Image, Cmd: .Config.Cmd, Env: (.Config.Env | $ENV_NAMES),
+    Hash: .Config.Labels[\"com.docker.compose.config-hash\"]}}" 2>/dev/null)" || HAVE=""
+  if [[ -z "$WANT" || "$WANT" == "null" || -z "$HAVE" || "$HAVE" == "null" ]]; then
+    warn "postgres: could not read the compose render or the container — drift not checked"
+    return 0
+  fi
+  IMG_ENV="$(docker image inspect "$(jq -r '.Image' <<<"$HAVE")" 2>/dev/null \
+    | jq -c ".[0].Config.Env | $ENV_NAMES" 2>/dev/null)" || IMG_ENV='[]'
+  WANT_IMG="$(docker image inspect "$(jq -r '.image // empty' <<<"$WANT")" 2>/dev/null \
+    | jq -c ".[0] | {Id, Env: (.Config.Env | $ENV_NAMES)}" 2>/dev/null)" || WANT_IMG=""
+  # One line per difference; "warn " = a setting not applied, "info " = the
+  # running server is unaffected. compose config re-escapes `$` as `$$`.
+  if ! LINES="$(jq -rn --argjson w "$WANT" --argjson h "$HAVE" \
+                  --argjson ienv "${IMG_ENV:-[]}" --argjson wi "${WANT_IMG:-null}" '
+    def unesc: gsub("\\$\\$"; "$");
+    def kv: map(select(contains("=")) | split("=") as $p
+                | {key: $p[0], value: ($p[1:] | join("="))}) | from_entries;
+    def ver($e): ($e | map(select(startswith("PG_VERSION=")))[0] // "" | ltrimstr("PG_VERSION="));
+    def shown: if . == "" then "(?)" else . end;
+    ($w.image // "") as $wimg | ($h.Config.Image // "") as $himg |
+    (($w.command // []) | map(unesc)) as $wc | ($h.Config.Cmd // []) as $hc |
+    ($wc | kv) as $W | ($hc | kv) as $H |
+    (if $wi != null and $wi.Id != $h.Image then
+       (ver($h.Config.Env // [])) as $hv | (ver($wi.Env)) as $wv |
+       if $hv == $wv and $hv != "" then
+         "info image: \($wimg) was rebuilt upstream and pulled (same \($hv)); the container runs the previous build"
+       else
+         "warn image: running \($himg) \($hv | shown), pulled \($wimg) is \($wv | shown)"
+       end
+     elif $wimg != $himg then
+       if $wi != null then "info image: compose names it \($wimg), the container \($himg) — the same image"
+       else "warn image: running \($himg), compose \($wimg) (not pulled here)" end
+     else empty end),
+    (if ($wc | length) > 0 then
+       ([$W, $H] | add | keys[]) as $k | select($W[$k] != $H[$k])
+       | "warn \($k): running \($H[$k] // "(default)"), compose \($W[$k] // "(default)")"
+     else empty end),
+    (if ($wc | length) > 0
+        and ($wc | map(select(contains("=") | not))) != ($hc | map(select(contains("=") | not)))
+     then "warn command: running \($hc | join(" ")), compose \($wc | join(" "))" else empty end),
+    ((($h.Config.Env // []) | map(split("=")[0])) as $he
+     | (($ienv | map(split("=")[0])) + ($w.environment // [])) as $known
+     | ($he - $known | length) as $extra
+     | (($w.environment // []) - $he | length) as $missing
+     | if $extra > 0 or $missing > 0 then
+         "info environment: \($extra) variable(s) in the container that compose no longer sets, \($missing) not yet in it"
+       else empty end)
+  ' 2>/dev/null)"; then
+    warn "postgres: comparing with compose failed (jq) — drift not checked"
+    return 0
+  fi
+  if [[ -z "$LINES" ]]; then
+    # the hash covers the image by name only — a moved tag is caught above
+    WANT_HASH="$(compose_cmd config --hash "$PG_SVC" 2>/dev/null | awk '{print $2}')" || WANT_HASH=""
+    HAVE_HASH="$(jq -r '.Config.Hash // empty' <<<"$HAVE")" || HAVE_HASH=""
+    if [[ -n "$WANT_HASH" && "$WANT_HASH" == "$HAVE_HASH" ]]; then
+      log "postgres: running container matches compose"
+      return 0
+    fi
+    LINES="info config-hash differs from compose outside what was compared (environment values, ports, volumes …)"
+  fi
+  if grep -q '^warn ' <<<"$LINES"; then
+    while IFS= read -r L; do
+      if [[ "$L" == warn\ * ]]; then warn "postgres: ${L#warn } — NOT applied"; fi
+    done <<<"$LINES"
+    warn "postgres: update.sh does not recreate the database; to apply, recreate it deliberately — window, dump first, save \`docker logs postgres\`, stop backend and ocpp (README, \"Recreating postgres\")"
+  fi
+  while IFS= read -r L; do
+    if [[ "$L" == info\ * ]]; then
+      log "postgres: ${L#info } — the running server is unaffected, but any \`compose up\` without --no-recreate will recreate the database"
+    fi
+  done <<<"$LINES"
+  return 0
+}
+
 # ─── Step 6b: Render app env files ───────────────────────────────────
 #
 # After workdir/{db,frontend} are updated to the new refs, brands may
@@ -676,6 +782,7 @@ record_patch_baseline
 rolling_restart
 run_hook post-update.sh
 record_version
+report_postgres_drift
 verify_update
 prune_images
 
