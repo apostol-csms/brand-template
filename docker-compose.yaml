@@ -384,6 +384,8 @@ services:
       PGHOSTAPI: postgres
       PGPORTAPI: 5432
       PGUSERAPI: apibot
+      PGSERVICEFILE: /etc/csms/pg_service.conf
+      PGSERVICE: csms
       # Track A gateway (T592). Off unless the brand turns it on: `/api/v2`
       # then goes to platform-service (profile `gateway` below). An unset
       # variable already meant off (module default); the explicit false only
@@ -405,6 +407,7 @@ services:
       # License envelope — read by both process-LicenseServer (Phase 3a)
       # and module-LicenseServer (Phase 3b) at boot + on mtime change.
       - ./conf/license.json:/etc/csms/conf/license.json:ro
+      - ./.docker/libpq/pg_service.conf:/etc/csms/pg_service.conf:ro
     depends_on:
       db-migrate:
         condition: service_completed_successfully
