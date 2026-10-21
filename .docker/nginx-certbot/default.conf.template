@@ -386,6 +386,7 @@ server {
     listen 443 ssl$NGINX_PROXY_PROTO_OPTS;
 
     server_name ocpp.${DOMAIN};
+    if ($soap_refused) { return 444; }   # map $soap_refused, nginx.conf
 
     ssl_certificate /etc/letsencrypt/live/ocpp.${DOMAIN}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/ocpp.${DOMAIN}/privkey.pem;
@@ -608,6 +609,7 @@ server {
     listen 443 ssl$NGINX_PROXY_PROTO_OPTS;
 
     server_name ws.${DOMAIN};
+    if ($soap_refused) { return 444; }   # map $soap_refused, nginx.conf
 
     access_log  /var/log/nginx/ws_access.log ws_handshake;
     error_log   /var/log/nginx/ws_error.log;
