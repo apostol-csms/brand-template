@@ -104,16 +104,41 @@ SELECT set_config('password.pgbouncer', :'pgbpass', false);
 DO \$\$
 DECLARE
   vPassword text := coalesce(current_setting('password.pgbouncer', true), '');
+  vDetail   text;
+  vHint     text;
 BEGIN
   IF vPassword = '' THEN
     RAISE EXCEPTION 'hook/pre-update: пароль роли pgbouncer пуст — проверь DB_PASS_PGBOUNCER в workdir/.env';
   END IF;
 
-  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'pgbouncer') THEN
-    EXECUTE format('CREATE ROLE pgbouncer LOGIN PASSWORD %L', vPassword);
-  ELSE
-    EXECUTE format('ALTER ROLE pgbouncer LOGIN PASSWORD %L', vPassword);
-  END IF;
+  BEGIN
+    -- pgbouncer ходит по scram-sha-256 (pgbouncer.ini.template), md5-хэш ему
+    -- не годится; к тому же md5 даёт WARNING, и его CONTEXT с паролем уходит
+    -- в журнал сервера мимо обработчика ниже. Только на эту транзакцию.
+    PERFORM set_config('password_encryption', 'scram-sha-256', true);
+
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'pgbouncer') THEN
+      EXECUTE format('CREATE ROLE pgbouncer LOGIN PASSWORD %L', vPassword);
+    ELSE
+      EXECUTE format('ALTER ROLE pgbouncer LOGIN PASSWORD %L', vPassword);
+    END IF;
+  EXCEPTION WHEN OTHERS OR query_canceled THEN
+    -- Упавший EXECUTE кладёт в CONTEXT весь оператор — вместе с паролем, и в
+    -- вывод выката, и в журнал сервера. OTHERS не ловит отмену (таймаут, Ctrl-C
+    -- на ожидании блокировки) — она названа отдельно. Поднимаем ту же ошибку: код,
+    -- текст и DETAIL (с HINT в нём) сохраняются, CONTEXT указывает на этот RAISE.
+    -- RAISE не принимает NULL в USING, а пустая строка печатается пустой
+    -- строкой DETAIL — поэтому без DETAIL, когда он пуст.
+    GET STACKED DIAGNOSTICS vDetail = PG_EXCEPTION_DETAIL, vHint = PG_EXCEPTION_HINT;
+    vDetail := concat_ws(' ', nullif(vDetail, ''), nullif(vHint, ''));
+    IF vDetail = '' THEN
+      RAISE EXCEPTION USING ERRCODE = SQLSTATE,
+        MESSAGE = 'hook/pre-update: роль pgbouncer: ' || SQLERRM;
+    END IF;
+    RAISE EXCEPTION USING ERRCODE = SQLSTATE,
+      MESSAGE = 'hook/pre-update: роль pgbouncer: ' || SQLERRM,
+      DETAIL = vDetail;
+  END;
 END
 \$\$;
 
