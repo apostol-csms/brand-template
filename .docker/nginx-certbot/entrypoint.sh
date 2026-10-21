@@ -72,12 +72,27 @@ envsubst '$DOMAIN $NGINX_PROXY_PROTO_OPTS' \
 #   not every 12 hours for nothing.
 # --no-random-sleep-on-renew — deterministic timing, easier to spot in
 #   the logs.
+#
+# One failed line must not take the edge down. `certbot renew` exits
+# 1 when any lineage fails (ACME unreachable, a name whose DNS left this
+# host), and under `set -e` that ended this script — PID 1 — and with it
+# nginx and the stations' wss, in a restart loop. The failure is now one
+# plain log line, nginx keeps serving the certificates it has, and the
+# outcome of every pass lands in $RENEW_STATUS for `renew-status` and
+# check.sh [renew].
+RENEW_STATUS=/run/certbot-renew.status
+rm -f "$RENEW_STATUS"   # /run survives `docker restart`: no stale outcome
 while true; do
+  rc=0
   certbot renew \
     --webroot --webroot-path /var/www/certbot \
     --installer null \
     --non-interactive \
     --deploy-hook "nginx -s reload" \
-    --no-random-sleep-on-renew
+    --no-random-sleep-on-renew || rc=$?
+  echo "$rc $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$RENEW_STATUS"
+  if [ "$rc" -ne 0 ]; then
+    echo "certbot-renew: FAILED rc=$rc — at least one certificate line did not renew; nginx keeps serving the current certificates. Lines and days left: docker exec nginx renew-status; details (incl. \"Another instance of Certbot\" when a manual certbot ran at the same time): /var/log/letsencrypt/letsencrypt.log" >&2
+  fi
   sleep 12h & wait $!
 done

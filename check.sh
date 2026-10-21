@@ -16,6 +16,8 @@
 #   [ocpp]        TCP connect :9220
 #   [frontend]    GET https://${DOMAIN}/ → 200 (landing)
 #   [tls]         cert expiry ≥ 7 days for a sample of subdomains
+#   [renew]       last `certbot renew` pass succeeded; every renewed line
+#                 has ≥ 21 days left (warn) / ≥ 7 days (fail)
 #   [disk]        filesystem < 85% (warn) / < 90% (fail)
 #   [memory]      MemAvailable ≥ 1 GB
 #   [version]     workdir/.installed-version matches docker image tag
@@ -38,6 +40,9 @@ WORKDIR="$SCRIPT_DIR/workdir"
 JSON=0
 LOCAL=0
 MIN_TLS_DAYS=7
+# certbot renews at 30 days left, twice a day: a line still under 21 days
+# has missed ~18 passes in a row.
+RENEW_OVERDUE_DAYS=21
 DISK_WARN_PCT=85
 DISK_FAIL_PCT=90
 MIN_RAM_MB=1024
@@ -325,6 +330,58 @@ check_tls() {
   fi
 }
 
+# A failed renewal no longer stops nginx, so it has to be seen here.
+# [tls] probes three public names; this reads every line certbot renews,
+# including names nginx does not serve, through `renew-status` in the image.
+check_renew() {
+  command -v docker >/dev/null 2>&1 || return
+  local OUT RC=0
+  OUT="$(compose_cmd exec -T nginx renew-status 2>/dev/null)" || RC=$?
+  if (( RC == 126 || RC == 127 )); then
+    # The brand repo (this script) is pulled before nginx is rebuilt; a
+    # --frontend-only update recreates nginx from its old image. Not a
+    # renewal fault — and a warn here would turn into update.sh exit 2.
+    record renew ok "skipped: nginx image has no renew-status yet"
+    return
+  elif (( RC != 0 )); then
+    record renew warn "renew-status failed (rc=$RC) — is nginx running?"
+    return
+  fi
+  local KIND NAME VAL REST LAST_RC="" LAST_AT="" N=0 MIN=999999 MIN_NAME="" OVERDUE="" EXPIRING="" UNREADABLE=""
+  while read -r KIND NAME VAL REST; do
+    case "$KIND" in
+      last)
+        [[ "$NAME" != "none" ]] && { LAST_RC="$NAME"; LAST_AT="$VAL"; } ;;
+      line)
+        N=$((N + 1))
+        if [[ ! "$VAL" =~ ^-?[0-9]+$ ]]; then
+          UNREADABLE+="${UNREADABLE:+ }$NAME"
+          continue
+        fi
+        (( VAL < MIN )) && { MIN=$VAL; MIN_NAME="$NAME"; }
+        if (( VAL < MIN_TLS_DAYS )); then
+          EXPIRING+="${EXPIRING:+ }$NAME(${VAL}d)"
+        elif (( VAL < RENEW_OVERDUE_DAYS )); then
+          OVERDUE+="${OVERDUE:+ }$NAME(${VAL}d)"
+        fi ;;
+    esac
+  done <<<"$OUT"
+  local LAST="no completed pass yet"
+  [[ -n "$LAST_RC" ]] && LAST="last pass rc=$LAST_RC at $LAST_AT"
+  local MORE="${OVERDUE:+; overdue: $OVERDUE}${UNREADABLE:+; no certificate in live/: $UNREADABLE}"
+  if [[ -n "$EXPIRING" ]]; then
+    record renew fail "expiring (< ${MIN_TLS_DAYS}d): $EXPIRING${MORE}; $LAST"
+  elif [[ -n "$LAST_RC" && "$LAST_RC" != "0" ]]; then
+    record renew warn "certbot renew failed ($LAST)${MORE} — docker exec nginx renew-status"
+  elif [[ -n "$OVERDUE" || -n "$UNREADABLE" ]]; then
+    record renew warn "${OVERDUE:+overdue (< ${RENEW_OVERDUE_DAYS}d): $OVERDUE; }${UNREADABLE:+no certificate in live/: $UNREADABLE; }$LAST"
+  elif (( N == 0 )); then
+    record renew warn "no renewal lines (renewal/*.conf) — certificates are not renewed; $LAST"
+  else
+    record renew ok "$N lines, min ${MIN}d ($MIN_NAME); $LAST"
+  fi
+}
+
 check_disk() {
   local PCT
   PCT="$(df --output=pcent "$SCRIPT_DIR" | tail -1 | tr -d ' %')"
@@ -416,6 +473,7 @@ if [[ -f "$WORKDIR/.env" ]]; then
   check_ocpp_tcp
   check_frontend_landing
   check_tls
+  check_renew
   check_disk
   check_memory
   check_version_match
