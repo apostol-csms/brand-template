@@ -108,6 +108,7 @@ case "$PROVIDER" in
     export DB_PASS_MAILBOT="$(vget db_mailbot)"
     export DB_PASS_OCPP="$(vget db_ocpp)"
     export DB_PASS_OCPI="$(vget db_ocpi)"
+    export DB_PASS_CLOUDPAYMENTS="$(vget db_cloudpayments)"
     export DB_PASS_HTTP="$(vget db_http)"
     export DB_PASS_CPO="$(vget db_cpo)"
     export DB_PASS_DRIVER="$(vget db_driver)"
@@ -144,6 +145,7 @@ case "$PROVIDER" in
     export DB_PASS_MAILBOT="$(smget db-mailbot)"
     export DB_PASS_OCPP="$(smget db-ocpp)"
     export DB_PASS_OCPI="$(smget db-ocpi)"
+    export DB_PASS_CLOUDPAYMENTS="$(smget db-cloudpayments)"
     export DB_PASS_HTTP="$(smget db-http)"
     export DB_PASS_CPO="$(smget db-cpo)"
     export DB_PASS_DRIVER="$(smget db-driver)"
@@ -205,6 +207,8 @@ MANDATORY=(
 )
 
 OPTIONAL=(
+  # Not used by any service: unset, db-init generates a random password.
+  DB_PASS_CLOUDPAYMENTS
   # GIT_TOKEN was once mandatory for cloning the apostol-csms platform
   # repos (db, frontend, backend). Those are public now, so anonymous
   # `git clone` works. The token is still respected — if set, it is
