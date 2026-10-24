@@ -366,6 +366,7 @@ services:
       - lan-network
       - db-network
     restart: unless-stopped
+    stop_grace_period: 50s
     env_file:
       - ./workdir/.env
     environment:
@@ -425,6 +426,7 @@ services:
     ports:
       - "9220:9220"
     restart: unless-stopped
+    stop_grace_period: 50s
     env_file:
       - ./workdir/.env
     environment:
