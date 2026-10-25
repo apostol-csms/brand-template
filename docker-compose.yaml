@@ -446,6 +446,12 @@ services:
       PGUSERAPI: apibot
       API_HOST: cloud.${DOMAIN:-localhost}
       OCPP_HOST: cs.${DOMAIN:-localhost}
+      # T590 Ш6 (T419): workers and the PostgreSQL pool of EACH worker. The image sets 1/4/8, but an EMPTY compose
+      # value is an absent key and falls to libapostol's 1/5, so every line carries its own default. More than one
+      # worker only with commands through the database. CS_NODE / CS_NODE_URL are not set: one cs per brand.
+      CS_WORKERS: ${CS_WORKERS:-1}
+      CS_POOL_MIN: ${CS_POOL_MIN:-4}
+      CS_POOL_MAX: ${CS_POOL_MAX:-8}
     volumes:
       # T193 — /var/log/cs/error.log и /etc/cs/logs/postgres.log
       # переживают пересоздание. Второй — единственный носитель
