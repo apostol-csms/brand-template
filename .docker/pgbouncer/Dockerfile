@@ -1,6 +1,6 @@
 # Плавающий тег upstream'а. Зеркалирующий бренд фиксирует его датой
 # и подставляет полную ссылку через PGBOUNCER_IMAGE.
-ARG PGBOUNCER_IMAGE=edoburu/pgbouncer:latest
+ARG PGBOUNCER_IMAGE=edoburu/pgbouncer:v1.26.1-p0
 FROM ${PGBOUNCER_IMAGE}
 
 USER root

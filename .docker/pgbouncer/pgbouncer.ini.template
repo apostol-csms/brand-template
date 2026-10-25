@@ -31,3 +31,11 @@ default_pool_size = ${PGBOUNCER_DEFAULT_POOL_SIZE}
 ; (PGHOSTAPI in compose), roughly 64 slots with WORKER_PROCESSES=8, so
 ; pgbouncer's share has to leave room for it.
 max_db_connections = ${PGBOUNCER_MAX_DB_CONNECTIONS}
+; After a failed login to the server pgbouncer answers EVERY client with the
+; cached error for this long, without trying to log in again. The default is
+; 15 s: after a failover the old primary refuses the first login («the database
+; system is shutting down»), and the pool stays cut off for 15 s although the
+; new primary already writes (T1123, measured on the k11 stand: 16:38:19 -> :34).
+; One second costs one login attempt per pool per second while the database is
+; down (T1143).
+server_login_retry = 1

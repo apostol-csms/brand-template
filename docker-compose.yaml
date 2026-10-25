@@ -271,7 +271,7 @@ services:
     build:
       context: ./.docker/pgbouncer
       args:
-        PGBOUNCER_IMAGE: ${PGBOUNCER_IMAGE:-edoburu/pgbouncer:latest}
+        PGBOUNCER_IMAGE: ${PGBOUNCER_IMAGE:-edoburu/pgbouncer:v1.26.1-p0}
     container_name: pgbouncer
     networks:
       - db-network
