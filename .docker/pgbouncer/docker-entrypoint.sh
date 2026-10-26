@@ -30,10 +30,12 @@
 set -eu
 
 export DB_NAME="${DB_NAME:-csms}"
-# Pool sizing. Keep max_db_connections below postgres' max_connections minus
-# what connects directly (apibot) — see pgbouncer.ini.template.
+# Pool sizing. max_db_connections is never below 200 (owner, 27.10, T1186). Keep it
+# below postgres' max_connections minus what connects directly (apibot, ~64) and
+# superuser_reserved_connections (3) — so max_connections has to be raised
+# (PG_MAX_CONNECTIONS) on a host that runs the stock 200. See pgbouncer.ini.template.
 export PGBOUNCER_DEFAULT_POOL_SIZE="${PGBOUNCER_DEFAULT_POOL_SIZE:-50}"
-export PGBOUNCER_MAX_DB_CONNECTIONS="${PGBOUNCER_MAX_DB_CONNECTIONS:-100}"
+export PGBOUNCER_MAX_DB_CONNECTIONS="${PGBOUNCER_MAX_DB_CONNECTIONS:-200}"
 
 envsubst '$DB_NAME $PGBOUNCER_DEFAULT_POOL_SIZE $PGBOUNCER_MAX_DB_CONNECTIONS' \
   < /etc/pgbouncer/pgbouncer.ini.template \
