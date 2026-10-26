@@ -54,6 +54,28 @@ envsubst '$DOMAIN $NGINX_PROXY_PROTO_OPTS' \
 
 # Start nginx
 /usr/sbin/nginx -g 'daemon off;' &
+NGINX_PID=$!
+BG_PID=
+
+# T682 — stop. This script is PID 1, and PID 1 has no default action for SIGTERM: with no handler
+# `docker stop` waited its 10 s and killed the container (exit 137), cutting every station's wss
+# hard. Now the signal reaches nginx as SIGQUIT (graceful: no new connections, workers finish);
+# a proxied WebSocket (proxy_read_timeout 86400) would hold its worker for a day, so after 5 s the
+# handler escalates to SIGTERM (fast shutdown) and the container exits 0 in about 5 s. Not done with
+# `worker_shutdown_timeout` in nginx.conf: that also applies to `nginx -s reload` (certbot deploy
+# hook, tls-rsa) and would cut every station's wss at each certificate renewal.
+stop_edge() {
+  trap '' TERM INT QUIT
+  kill -QUIT "$NGINX_PID" 2>/dev/null || true
+  if [ -n "$BG_PID" ]; then kill "$BG_PID" 2>/dev/null || true; fi
+  ( sleep 5; kill -TERM "$NGINX_PID" 2>/dev/null ) &
+  WATCHDOG_PID=$!
+  wait "$NGINX_PID" 2>/dev/null || true
+  kill "$WATCHDOG_PID" 2>/dev/null || true
+  if [ -n "$BG_PID" ]; then wait "$BG_PID" 2>/dev/null || true; fi
+  exit 0
+}
+trap stop_edge TERM INT QUIT
 
 # Certificate renewal over webroot. Plain-HTTP /.well-known/acme-
 # challenge/ is served by the ACME-safe :80 server block — no standalone
@@ -89,10 +111,14 @@ while true; do
     --installer null \
     --non-interactive \
     --deploy-hook "nginx -s reload" \
-    --no-random-sleep-on-renew || rc=$?
+    --no-random-sleep-on-renew &
+  BG_PID=$!
+  wait "$BG_PID" || rc=$?
   echo "$rc $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$RENEW_STATUS"
   if [ "$rc" -ne 0 ]; then
     echo "certbot-renew: FAILED rc=$rc — at least one certificate line did not renew; nginx keeps serving the current certificates. Lines and days left: docker exec nginx renew-status; details (incl. \"Another instance of Certbot\" when a manual certbot ran at the same time): /var/log/letsencrypt/letsencrypt.log" >&2
   fi
-  sleep 12h & wait $!
+  sleep 12h &
+  BG_PID=$!
+  wait "$BG_PID"
 done
