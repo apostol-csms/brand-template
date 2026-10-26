@@ -122,7 +122,9 @@ services:
     # Wait for each SPA to pass its HTTP healthcheck before nginx is
     # allowed to route traffic. Prevents bare-domain ↔ auth confusion
     # after rolling restart (see x-spa-healthcheck comment above).
-    # backend/ocpp don't ship healthchecks yet → service_started.
+    # backend and ocpp have /readyz healthchecks (T1172), but nginx stays on
+    # service_started for both: an unreachable database at boot must not keep
+    # nginx down.
     depends_on:
       backend:  { condition: service_started }
       ocpp:     { condition: service_started }
@@ -409,6 +411,17 @@ services:
       # and module-LicenseServer (Phase 3b) at boot + on mtime change.
       - ./conf/license.json:/etc/csms/conf/license.json:ro
       - ./.docker/libpq/pg_service.conf:/etc/csms/pg_service.conf:ro
+    # T1172 (T034): readiness of the backend = SELECT 1 through the worker's
+    # pool (/readyz, 503 while the database role is lost). A red probe only
+    # changes the status (docker restarts nothing); nginx and platform-service
+    # stay on service_started on purpose, so an unreachable database at boot
+    # does not keep nginx down.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "--max-time", "3", "http://127.0.0.1:4977/readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     depends_on:
       db-migrate:
         condition: service_completed_successfully
@@ -459,6 +472,16 @@ services:
       # его нет, и без тома приёмка T196 не имеет чем подтвердиться.
       - logs-ocpp:/var/log/cs
       - logs-ocpp-pg:/etc/cs/logs
+    # T1172 (T034, T1173): readiness of the Central System = SELECT 1 through
+    # the worker's pool (/readyz on the ocpp port; 503 while the database role
+    # is lost). A red probe only changes the status (docker restarts nothing);
+    # nginx stays on service_started, as for backend.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "--max-time", "3", "http://127.0.0.1:9220/readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     depends_on:
       - backend
 
