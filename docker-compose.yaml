@@ -402,6 +402,15 @@ services:
       # `network_mode: host` or an explicit `hostname:` (GatewayAPI README).
       GATEWAY_ENABLE: ${GATEWAY_ENABLE:-false}
       GATEWAY_ALLOWED_CIDR: ${GATEWAY_ALLOWED_CIDR:-}
+      # T1007/T1105: one active copy per background role (the helper PGFetch/
+      # PGFile, TaskScheduler, ReportServer, LicenseServer, MessageServer):
+      # a second backend on the same database stays a standby instead of
+      # repeating their outbound calls, jobs and letters. On by default; the
+      # price is +5 apibot connections per copy. The image's entrypoint
+      # defaults to true as well; the explicit line is the rollback place:
+      # LEADER_ENABLE=false (only true|false) in workdir/.env and recreate
+      # the backend.
+      LEADER_ENABLE: ${LEADER_ENABLE:-true}
     volumes:
       - tmp:/tmp/csms
       - files:/etc/csms/files
