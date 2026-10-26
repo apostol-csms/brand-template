@@ -557,12 +557,16 @@ services:
         required: false
     healthcheck: *spa-healthcheck
 
+  # T174 — the four SPA services take NO env_file. They are static nginx
+  # (driver, auth) and two Node servers (frontend, pay) whose brand values
+  # come from the signed manifest or the build; `env_file: workdir/.env`
+  # put every database password, CURRENT_KEY and OAuth2 secret of the site
+  # into the environment of each of them (`docker exec <svc> env`). A
+  # variable a service really needs is named here, under `environment:`.
   frontend:
     image: ${REGISTRY:-ghcr.io/apostol-csms}/csms-webapp:${PLATFORM_VERSION:-latest}
     container_name: frontend
     restart: unless-stopped
-    env_file:
-      - ./workdir/.env
     networks:
       - lan-network
     healthcheck: *spa-healthcheck
@@ -570,8 +574,6 @@ services:
   driver:
     image: ${REGISTRY:-ghcr.io/apostol-csms}/csms-driver:${PLATFORM_VERSION:-latest}
     container_name: driver
-    env_file:
-      - ./workdir/.env
     networks:
       - lan-network
     restart: unless-stopped
@@ -581,8 +583,6 @@ services:
     image: ${REGISTRY:-ghcr.io/apostol-csms}/csms-pay:${PLATFORM_VERSION:-latest}
     container_name: pay
     restart: unless-stopped
-    env_file:
-      - ./workdir/.env
     networks:
       - lan-network
     healthcheck: *spa-healthcheck
@@ -590,8 +590,6 @@ services:
   auth:
     image: ${REGISTRY:-ghcr.io/apostol-csms}/csms-auth:${PLATFORM_VERSION:-latest}
     container_name: auth
-    env_file:
-      - ./workdir/.env
     networks:
       - lan-network
     restart: unless-stopped

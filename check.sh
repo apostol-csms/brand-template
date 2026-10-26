@@ -10,6 +10,7 @@
 # Checks:
 #   [containers]  every compose service has a container, running + healthy
 #   [restart]     no long-running container with restart policy "no" (T393)
+#   [spa_env]     frontend/driver/pay/auth carry no secret-looking variable names (T174)
 #   [postgres]    pg_isready from inside the container
 #   [api]         GET https://cloud.${DOMAIN}/api/v1/ping → 200
 #   [openid]      GET https://auth.${DOMAIN}/.well-known/openid-configuration
@@ -216,6 +217,31 @@ check_restart() {
     record restart warn "restart policy \"no\" — will not survive a dockerd restart/reboot: $BAD"
   else
     record restart ok "every long-running container has a restart policy"
+  fi
+}
+
+# T174 — a static front must not carry the site's secrets. frontend, driver,
+# pay and auth take no env_file in compose; this notices the day someone puts
+# it back (or names a secret under `environment:`). Names only — a value is
+# never read into the report.
+check_spa_env() {
+  command -v docker >/dev/null 2>&1 || return
+  local SVC ID NAMES BAD="" SEEN=0
+  for SVC in frontend driver pay auth; do
+    ID="$(compose_cmd ps -a -q "$SVC" 2>/dev/null)"
+    [[ -z "$ID" ]] && continue
+    docker inspect "$ID" >/dev/null 2>&1 || { BAD+="${BAD:+; }$SVC: cannot inspect"; continue; }
+    SEEN=$((SEEN + 1))
+    NAMES="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$ID" 2>/dev/null | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' \
+      | grep -E 'PASS|SECRET|TOKEN|(^|_)KEY(_|$)' | tr '\n' ',')"
+    [[ -n "$NAMES" ]] && BAD+="${BAD:+; }$SVC: ${NAMES%,}"
+  done
+  if [[ -n "$BAD" ]]; then
+    record spa_env warn "secret-looking variables in a front's environment (T174): $BAD"
+  elif [[ $SEEN -eq 0 ]]; then
+    record spa_env warn "no frontend/driver/pay/auth container to inspect"
+  else
+    record spa_env ok "$SEEN of frontend/driver/pay/auth carry no secret-looking variables"
   fi
 }
 
@@ -467,6 +493,7 @@ check_patches() {
 if [[ -f "$WORKDIR/.env" ]]; then
   check_containers
   check_restart
+  check_spa_env
   check_postgres
   check_api_ping
   check_openid
