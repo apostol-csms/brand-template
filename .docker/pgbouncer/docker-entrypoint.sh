@@ -34,7 +34,10 @@ export DB_NAME="${DB_NAME:-csms}"
 # below postgres' max_connections minus what connects directly (apibot, ~64) and
 # superuser_reserved_connections (3) — so max_connections has to be raised
 # (PG_MAX_CONNECTIONS) on a host that runs the stock 200. See pgbouncer.ini.template.
-export PGBOUNCER_DEFAULT_POOL_SIZE="${PGBOUNCER_DEFAULT_POOL_SIZE:-50}"
+# default_pool_size is 150 (owner, 27.10, T1194): it is per (database, role), and the ocpp role alone needs
+# N_cs x CS_WORKERS x (CS_POOL_MAX + 1) server connections (T1180: 3x4 red at 50, green at 150). Keep it
+# >= 1.2 x that ceiling; max_db_connections still caps the sum over the roles.
+export PGBOUNCER_DEFAULT_POOL_SIZE="${PGBOUNCER_DEFAULT_POOL_SIZE:-150}"
 export PGBOUNCER_MAX_DB_CONNECTIONS="${PGBOUNCER_MAX_DB_CONNECTIONS:-200}"
 
 envsubst '$DB_NAME $PGBOUNCER_DEFAULT_POOL_SIZE $PGBOUNCER_MAX_DB_CONNECTIONS' \
