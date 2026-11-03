@@ -186,11 +186,12 @@ services:
     # `.docker/postgres/postgresql.conf` (kept in the repo as the
     # canonical pgtune-style baseline — see https://pgtune.leopard.in.ua).
     #
-    # Why max_connections=200: with WORKER_PROCESSES=8 the backend pool
-    # holds ~64 apibot + ~31 daemon slots permanently, leaving no room
-    # for kernel (db-migrate) or one-off admin queries.  200 leaves
-    # headroom; at ~10 MB per idle slot this is well within reach on a
-    # 4+ GB host.  Revisit if WORKER_PROCESSES is tuned above 16.
+    # Why max_connections=300: pgbouncer may open up to max_db_connections
+    # (200) server connections, apibot (~64 slots with WORKER_PROCESSES=8)
+    # connects to postgres directly around it, and
+    # superuser_reserved_connections (3) is held back — ~267, which 200
+    # does not cover (T1186).  At ~10 MB per idle slot 300 is still within
+    # reach on a 4+ GB host.  Revisit if WORKER_PROCESSES is tuned above 16.
     #
     # `search_path` is set per-database via ALTER DATABASE in the
     # csms-db image's compose-env.sh — not here — so the value lives
@@ -204,7 +205,7 @@ services:
       - "-c"
       - 'search_path="$$user", kernel, public'
       - "-c"
-      - "max_connections=${PG_MAX_CONNECTIONS:-200}"
+      - "max_connections=${PG_MAX_CONNECTIONS:-300}"
       - "-c"
       - "shared_buffers=${PG_SHARED_BUFFERS:-512MB}"
       - "-c"

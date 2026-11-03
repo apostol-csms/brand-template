@@ -27,7 +27,7 @@ default_pool_size = ${PGBOUNCER_DEFAULT_POOL_SIZE}
 ; Ceiling on server connections to the database, across all pools.
 ; default_pool_size is per (database, user) pair, so without this the
 ; theoretical total is pool_size x number of pooled roles — 1050 at the default
-; 150 against a max_connections of 200. Also note apibot connects to postgres DIRECTLY
+; 150 against the stock max_connections of 200 (the templates set 300, T1231). Also note apibot connects to postgres DIRECTLY
 ; (PGHOSTAPI in compose), roughly 64 slots with WORKER_PROCESSES=8, so
 ; pgbouncer's share has to leave room for it.
 max_db_connections = ${PGBOUNCER_MAX_DB_CONNECTIONS}
