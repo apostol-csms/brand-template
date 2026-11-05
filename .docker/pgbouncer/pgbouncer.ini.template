@@ -1,5 +1,7 @@
 [databases]
-${DB_NAME} = host=postgres port=5432
+; The database the pooler logs into (T1229 П1): the compose service `postgres` unless PG_UPSTREAM_HOST says otherwise
+; (an external database, a Patroni balancer; docs/wiki/common/deployment-scenarios-n-binaries.md § 5).
+${DB_NAME} = host=${PG_UPSTREAM_HOST} port=${PG_UPSTREAM_PORT}
 
 [pgbouncer]
 listen_addr = 0.0.0.0

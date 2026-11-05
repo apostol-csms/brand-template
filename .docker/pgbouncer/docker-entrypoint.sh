@@ -27,6 +27,7 @@
 #                         the very same value
 # Optional:
 #   PGBOUNCER_DEFAULT_POOL_SIZE, PGBOUNCER_MAX_DB_CONNECTIONS — pool sizing.
+#   PG_UPSTREAM_HOST, PG_UPSTREAM_PORT — the database behind the pooler (default postgres:5432).
 set -eu
 
 export DB_NAME="${DB_NAME:-csms}"
@@ -39,8 +40,12 @@ export DB_NAME="${DB_NAME:-csms}"
 # >= 1.2 x that ceiling; max_db_connections still caps the sum over the roles.
 export PGBOUNCER_DEFAULT_POOL_SIZE="${PGBOUNCER_DEFAULT_POOL_SIZE:-150}"
 export PGBOUNCER_MAX_DB_CONNECTIONS="${PGBOUNCER_MAX_DB_CONNECTIONS:-200}"
+# T1229 П1 — where the pooler logs in. Defaults are the compose service `postgres`; an external database or a
+# balancer in front of a cluster (HAProxy :5000) is set in workdir/.env: PG_UPSTREAM_HOST / PG_UPSTREAM_PORT.
+export PG_UPSTREAM_HOST="${PG_UPSTREAM_HOST:-postgres}"
+export PG_UPSTREAM_PORT="${PG_UPSTREAM_PORT:-5432}"
 
-envsubst '$DB_NAME $PGBOUNCER_DEFAULT_POOL_SIZE $PGBOUNCER_MAX_DB_CONNECTIONS' \
+envsubst '$DB_NAME $PGBOUNCER_DEFAULT_POOL_SIZE $PGBOUNCER_MAX_DB_CONNECTIONS $PG_UPSTREAM_HOST $PG_UPSTREAM_PORT' \
   < /etc/pgbouncer/pgbouncer.ini.template \
   > /etc/pgbouncer/pgbouncer.ini
 

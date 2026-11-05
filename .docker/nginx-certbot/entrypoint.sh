@@ -43,6 +43,37 @@ else
   : > "$REAL_IP_CONF"
 fi
 
+# T1229 П2 — the stations' upstream group. CS_NODES: comma-separated host:port of the cs nodes (one per compose
+# service / VM); empty = one node `ocpp:9220`, the same as the fixed address before. least_conn: a station socket
+# lives for days, so connections are counted, not rotated. A node that fails to connect is skipped for 5 s
+# (max_fails=1 fail_timeout=5s; ignored with a single node): with max_fails=0 a silently dead VM has 0 connections,
+# least_conn keeps choosing it and every second station waits out proxy_connect_timeout (70 s) — measured in the
+# review. `resolve` follows the resolver of nginx.conf (valid=5s), so a recreated node is picked up without a reload.
+# No ip_hash, no affinity: the socket owner claims the command, any node may hold any station.
+CS_NODES="${CS_NODES//[\"\']}"
+CS_NODES="${CS_NODES:-ocpp:9220}"
+{
+  echo "upstream cs_nodes {"
+  echo "    zone cs_nodes 64k;"
+  echo "    least_conn;"
+  n=0
+  set -f   # no globbing of a stray `*` in the list
+  for node in ${CS_NODES//,/ }; do
+    if ! [[ "$node" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*:([0-9]{1,5})$ ]] || (( 10#${BASH_REMATCH[1]} < 1 || 10#${BASH_REMATCH[1]} > 65535 )); then
+      echo "edge: CS_NODES: '$node' is not host:port (port 1-65535) — refusing to start (a station upstream must not be guessed)" >&2
+      exit 1
+    fi
+    echo "    server $node resolve max_fails=1 fail_timeout=5s;"
+    n=$((n+1))
+  done
+  set +f
+  if (( n == 0 )); then
+    echo "edge: CS_NODES='$CS_NODES' names no node — refusing to start" >&2
+    exit 1
+  fi
+  echo "}"
+} > /etc/nginx/conf.d/cs-nodes.conf
+
 # Render default.conf from template. envsubst whitelists $DOMAIN, $ALT_DOMAIN (where present) and $NGINX_PROXY_PROTO_OPTS so unrelated `$variable` strings survive untouched.
 export DOMAIN="${DOMAIN:-localhost}"
 envsubst '$DOMAIN $NGINX_PROXY_PROTO_OPTS' \
@@ -76,6 +107,24 @@ stop_edge() {
   exit 0
 }
 trap stop_edge TERM INT QUIT
+
+# T1179 — nginx is a child of this script. If it dies on its own (OOM kill, a failed master, a bad
+# reload) while PID 1 keeps looping, the container stays `running` with no edge, no health and no
+# restart (`restart: unless-stopped` fires only when PID 1 exits). edge_wait <pid> waits for the
+# background job <pid> OR for nginx, whichever ends first: its status goes to WAIT_RC; when it was
+# nginx, PID 1 exits non-zero and the restart policy brings the edge back. A `docker stop` never
+# gets here: stop_edge exits 0 first.
+edge_wait() {
+  local done_pid=
+  WAIT_RC=0
+  wait -n -p done_pid "$NGINX_PID" "$1" || WAIT_RC=$?
+  if [ "$done_pid" = "$NGINX_PID" ]; then
+    kill "$1" 2>/dev/null || true
+    [ "$WAIT_RC" -ne 0 ] || WAIT_RC=1
+    echo "edge: nginx exited on its own (rc=$WAIT_RC) — leaving so that the restart policy recreates the edge" >&2
+    exit "$WAIT_RC"
+  fi
+}
 
 # Certificate renewal over webroot. Plain-HTTP /.well-known/acme-
 # challenge/ is served by the ACME-safe :80 server block — no standalone
@@ -113,12 +162,13 @@ while true; do
     --deploy-hook "nginx -s reload" \
     --no-random-sleep-on-renew &
   BG_PID=$!
-  wait "$BG_PID" || rc=$?
+  edge_wait "$BG_PID"
+  rc=$WAIT_RC
   echo "$rc $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$RENEW_STATUS"
   if [ "$rc" -ne 0 ]; then
     echo "certbot-renew: FAILED rc=$rc — at least one certificate line did not renew; nginx keeps serving the current certificates. Lines and days left: docker exec nginx renew-status; details (incl. \"Another instance of Certbot\" when a manual certbot ran at the same time): /var/log/letsencrypt/letsencrypt.log" >&2
   fi
   sleep 12h &
   BG_PID=$!
-  wait "$BG_PID"
+  edge_wait "$BG_PID"
 done

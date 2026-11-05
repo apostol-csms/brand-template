@@ -90,6 +90,8 @@ services:
       # Trusted edge: restore the real client IP (PROXY protocol or XFF).
       NGINX_PROXY_PROTOCOL: ${NGINX_PROXY_PROTOCOL:-}
       NGINX_REAL_IP_TRUSTED: ${NGINX_REAL_IP_TRUSTED:-}
+      # The stations' upstream: comma-separated host:port of the cs nodes (T1229 П2); empty = ocpp:9220.
+      CS_NODES: ${CS_NODES:-}
     networks:
       wan-network:
       lan-network:
@@ -292,6 +294,8 @@ services:
       - ./workdir/.env
     environment:
       DB_NAME: ${PGDATABASE:-csms}
+      PG_UPSTREAM_HOST: ${PG_UPSTREAM_HOST:-postgres}
+      PG_UPSTREAM_PORT: ${PG_UPSTREAM_PORT:-5432}
     healthcheck:
       # Explicit -U to avoid "no such user: postgres" log spam —
       # pg_isready defaults to the `postgres` OS user which isn't in
@@ -385,8 +389,8 @@ services:
       PGHOST: pgbouncer
       PGPORT: 6432
       PGUSER: daemon
-      PGHOSTAPI: postgres
-      PGPORTAPI: 5432
+      PGHOSTAPI: ${PGHOSTAPI:-postgres}
+      PGPORTAPI: ${PGPORTAPI:-5432}
       PGUSERAPI: apibot
       PGSERVICEFILE: /etc/csms/pg_service.conf
       PGSERVICE: csms
@@ -464,8 +468,8 @@ services:
       PGHOST: pgbouncer
       PGPORT: 6432
       PGUSER: ocpp
-      PGHOSTAPI: postgres
-      PGPORTAPI: 5432
+      PGHOSTAPI: ${PGHOSTAPI:-postgres}
+      PGPORTAPI: ${PGPORTAPI:-5432}
       PGUSERAPI: apibot
       API_HOST: cloud.${DOMAIN:-localhost}
       OCPP_HOST: cs.${DOMAIN:-localhost}
