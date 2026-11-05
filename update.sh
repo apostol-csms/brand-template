@@ -377,30 +377,45 @@ filter_present_services() {
   echo "${PRESENT# }"
 }
 
-wait_spas_healthy() {
-  [[ $DRY_RUN -eq 1 ]] && { log "[dry-run] skip wait_spas_healthy"; return 0; }
-  log "  wait SPAs healthy (max ${WAIT_HEALTHY_MAX_S}s)…"
-  local SPAS_PRESENT
-  SPAS_PRESENT="$(filter_present_services "$SPA_SERVICES")"
-  local t=0 pending
+# wait_services_healthy <label> <services> <on-timeout hint>
+# A service is ready when it runs and is either healthy or has no healthcheck at all — the same rule as
+# check.sh [containers] (`State == running` and `Health` empty or `healthy`), so a green wait is a green
+# check. Anything else — `starting`, `unhealthy`, `state:restarting`, `absent` — is pending. T1238: the wait used
+# to cover the SPAs only; ocpp (start_period 30 s) and platform-service were still `starting` when check.sh ran
+# right after phase 1/2 → a false "✗ containers" that went green a minute later.
+wait_services_healthy() {
+  local LABEL="$1" SERVICES="$2" HINT="${3:-}"
+  [[ $DRY_RUN -eq 1 ]] && { log "[dry-run] skip wait $LABEL healthy"; return 0; }
+  log "  wait $LABEL healthy (max ${WAIT_HEALTHY_MAX_S}s)…"
+  local t=0 pending status svc
   while (( t < WAIT_HEALTHY_MAX_S )); do
     pending=""
-    for svc in $SPAS_PRESENT; do
-      local status
+    for svc in $SERVICES; do
       status="$(compose_cmd ps --format json "$svc" 2>/dev/null \
-                | jq -rs '.[0].Health // "unknown"' 2>/dev/null || echo unknown)"
+                | jq -rs 'flatten
+                          | if length == 0 then "absent"
+                            else map(if .State != "running" then "state:" + .State
+                                     elif (.Health // "") == "" or .Health == "healthy" then "healthy"
+                                     else .Health end)
+                                 | map(select(. != "healthy")) | .[0] // "healthy" end' 2>/dev/null || echo unknown)"
+      status="${status%%$'\n'*}"
       [[ "$status" == "healthy" ]] || pending="$pending $svc=$status"
     done
     if [[ -z "$pending" ]]; then
-      log "  all SPAs healthy after ${t}s"
+      log "  all $LABEL healthy after ${t}s"
       return 0
     fi
     sleep 3; t=$((t+3))
   done
-  err "SPAs did not reach healthy within ${WAIT_HEALTHY_MAX_S}s:$pending"
-  err "  nginx phase SKIPPED — old nginx keeps routing. Investigate:"
-  err "  docker compose --env-file workdir/.env logs $SPA_SERVICES --tail=80"
+  err "$LABEL did not reach healthy within ${WAIT_HEALTHY_MAX_S}s:$pending"
+  [[ -z "$HINT" ]] || err "  $HINT"
+  err "  Investigate: docker compose --env-file workdir/.env logs $SERVICES --tail=80"
   exit 2
+}
+
+wait_spas_healthy() {
+  wait_services_healthy "SPAs" "$(filter_present_services "$SPA_SERVICES")" \
+    "nginx phase SKIPPED — old nginx keeps routing."
 }
 
 # ─── Backend LISTEN gate (T578) ──────────────────────────────────────
@@ -532,6 +547,7 @@ rolling_restart() {
   wait_spas_healthy
   log "rolling restart (phase 2 — nginx)"
   run compose_cmd up -d --no-deps --force-recreate nginx
+  RECREATED="$UPSTREAM ${LATE:+$LATE }nginx"   # T1238: verify_update waits for these before check.sh looks at them
 }
 
 # ─── Step 9b: Patch baseline ─────────────────────────────────────────
@@ -701,6 +717,13 @@ render_app_env() {
 # ─── Step 12: Verify ─────────────────────────────────────────────────
 
 verify_update() {
+  # T1238: ocpp (start_period 30 s), backend (60 s), platform-service were still `starting` when check.sh ran right after
+  # the rolling restart → a false "✗ containers" that went green a minute later. Wait here, AFTER record_version and the
+  # hooks (an exit 2 above would leave the version file stale), with the readiness rule of check.sh [containers].
+  if [[ -n "${RECREATED:-}" ]]; then
+    wait_services_healthy "recreated services" "$RECREATED" \
+      "the update is applied and recorded, but a recreated service is not ready — check.sh would report it."
+  fi
   if [[ -x "$SCRIPT_DIR/check.sh" ]]; then
     log "verify via ./check.sh"
     if ! run "$SCRIPT_DIR/check.sh"; then
