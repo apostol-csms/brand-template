@@ -465,6 +465,10 @@ server {
         proxy_read_timeout 86400;
     }
 
+    # /metrics is the in-stack scrape address of the service (ocpp:9220, backend:4977): the collector reads it
+    # inside the stack, from an address in METRICS_ALLOW; the edge answers 404 on this host (T1283).
+    location = /metrics { return 404; }
+
     location / {
         proxy_pass $ocpp_upstream;
         proxy_http_version 1.1;
@@ -695,6 +699,10 @@ server {
         proxy_set_header Connection "upgrade";
         proxy_read_timeout 86400;
     }
+
+    # /metrics is the in-stack scrape address of the service (ocpp:9220, backend:4977): the collector reads it
+    # inside the stack, from an address in METRICS_ALLOW; the edge answers 404 on this host (T1283).
+    location = /metrics { return 404; }
 
     location / {
         proxy_pass $backend_upstream;

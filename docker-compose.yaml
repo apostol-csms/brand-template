@@ -479,6 +479,9 @@ services:
       CS_WORKERS: ${CS_WORKERS:-1}
       CS_POOL_MIN: ${CS_POOL_MIN:-4}
       CS_POOL_MAX: ${CS_POOL_MAX:-4}
+      # Who may read /metrics (T1283): IP addresses or CIDRs of the collector, comma-separated, never a subnet
+      # the edge nginx sits in. Empty = loopback only. Same variable as the backend's (workdir/.env).
+      METRICS_ALLOW: ${METRICS_ALLOW:-}
     volumes:
       # T193 — /var/log/cs/error.log и /etc/cs/logs/postgres.log
       # переживают пересоздание. Второй — единственный носитель
