@@ -473,9 +473,9 @@ services:
       PGUSERAPI: apibot
       API_HOST: cloud.${DOMAIN:-localhost}
       OCPP_HOST: cs.${DOMAIN:-localhost}
-      # T590 Ш6 (T419): workers and the PostgreSQL pool of EACH worker. The image sets 1/4/4 (T1183: max = min until the K7 measure), but an EMPTY compose
-      # value is an absent key and falls to libapostol's 1/5, so every line carries its own default. More than one
-      # worker only with commands through the database (Transport = db). The default is 2 (T1335); a site pins its own W in workdir/.env. CS_NODE / CS_NODE_URL are not set: one cs per brand.
+      # T590 Ш6 (T419): workers and the PostgreSQL pool of EACH worker. The image sets 2/4/4 (T1183: max = min until the K7 measure), but an EMPTY compose
+      # value is an absent key and falls to libapostol's 1/5, so every line carries its own default. The default is 2
+      # workers (T1335; the image says the same), a site pins its own W in workdir/.env; the workers of one node pass commands to each other over IPC whatever the transport. CS_NODE / CS_NODE_URL are not set: one cs per brand.
       CS_WORKERS: ${CS_WORKERS:-2}
       CS_POOL_MIN: ${CS_POOL_MIN:-4}
       CS_POOL_MAX: ${CS_POOL_MAX:-4}
