@@ -451,7 +451,9 @@ services:
       - lan-network
       - db-network
     ports:
-      - "9220:9220"
+      # loopback by default: the edge nginx reaches ocpp over the docker network. A node of a multi-node
+      # setup that the edge reaches over the network sets OCPP_BIND to its private address.
+      - "${OCPP_BIND:-127.0.0.1}:9220:9220"
     restart: unless-stopped
     stop_grace_period: 50s
     env_file:

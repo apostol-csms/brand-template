@@ -66,6 +66,7 @@ server {
 
 server {
     listen 443 ssl$NGINX_PROXY_PROTO_OPTS;
+    include /etc/nginx/includes/uri-guard.conf;
 
     server_name cloud.${DOMAIN};
 
@@ -89,6 +90,7 @@ server {
 
 server {
     listen 443 ssl$NGINX_PROXY_PROTO_OPTS;
+    include /etc/nginx/includes/uri-guard.conf;
 
     server_name pay.${DOMAIN};
 
@@ -224,6 +226,7 @@ server {
 
 server {
     listen 443 ssl$NGINX_PROXY_PROTO_OPTS;
+    include /etc/nginx/includes/uri-guard.conf;
 
     server_name api.${DOMAIN};
 
@@ -244,6 +247,7 @@ server {
 
 server {
     listen 443 ssl$NGINX_PROXY_PROTO_OPTS;
+    include /etc/nginx/includes/uri-guard.conf;
 
     server_name cpo.${DOMAIN};
 
@@ -266,6 +270,7 @@ server {
 
 server {
     listen 443 ssl$NGINX_PROXY_PROTO_OPTS;
+    include /etc/nginx/includes/uri-guard.conf;
 
     server_name driver.${DOMAIN};
 
@@ -315,6 +320,7 @@ server {
 
 server {
     listen 443 ssl$NGINX_PROXY_PROTO_OPTS;
+    include /etc/nginx/includes/uri-guard.conf;
 
     server_name admin.${DOMAIN};
 
@@ -336,6 +342,7 @@ server {
 
 server {
     listen 443 ssl$NGINX_PROXY_PROTO_OPTS;
+    include /etc/nginx/includes/uri-guard.conf;
 
     server_name cs.${DOMAIN};
 
@@ -384,6 +391,7 @@ server {
 
 server {
     listen 443 ssl$NGINX_PROXY_PROTO_OPTS;
+    include /etc/nginx/includes/uri-guard.conf;
 
     server_name ocpp.${DOMAIN};
     if ($soap_refused) { return 444; }   # map $soap_refused, nginx.conf
@@ -485,6 +493,7 @@ server {
 
 server {
     listen 443 ssl$NGINX_PROXY_PROTO_OPTS;
+    include /etc/nginx/includes/uri-guard.conf;
 
     server_name auth.${DOMAIN};
 
@@ -566,6 +575,7 @@ server {
 
 server {
     listen 443 ssl$NGINX_PROXY_PROTO_OPTS;
+    include /etc/nginx/includes/uri-guard.conf;
 
     server_name ${DOMAIN} www.${DOMAIN};
 
@@ -611,6 +621,7 @@ server {
     listen 80;
     listen [::]:80;
     listen 443 ssl$NGINX_PROXY_PROTO_OPTS;
+    include /etc/nginx/includes/uri-guard.conf;
 
     server_name ws.${DOMAIN};
     if ($soap_refused) { return 444; }   # map $soap_refused, nginx.conf
