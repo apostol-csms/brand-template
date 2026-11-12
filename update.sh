@@ -48,6 +48,8 @@
 #      a changed `-c` setting): postgres is never recreated here. Report only.
 #  13. ./check.sh — note it exits 1 on a mere warning, and this step turns
 #      that into exit 2 for the whole update
+#      (CHECK_LOCAL=1 in workdir/.env makes check.sh probe through loopback:
+#      for a host that cannot reach its own public address)
 #  14. remove platform images of versions other than current and previous,
 #      then docker image prune -f
 
@@ -765,6 +767,9 @@ verify_update() {
       "the update is applied and recorded, but a recreated service is not ready — check.sh would report it."
   fi
   if [[ -x "$SCRIPT_DIR/check.sh" ]]; then
+    # check.sh reads CHECK_LOCAL from workdir/.env itself: a host that cannot reach its own public address
+    # (no hairpin NAT) sets it, and the probes go through 127.0.0.1. Without it every update on such a host
+    # ends in exit 2 here and never reaches the image cleanup below.
     log "verify via ./check.sh"
     if ! run "$SCRIPT_DIR/check.sh"; then
       warn "check.sh reported issues — review output above"

@@ -279,7 +279,9 @@ curl -s https://api.<domain>/api/v1/manifest | grep -c "<some other brand>"   # 
 
 If the host sits behind NAT without hairpin — common with cheap
 providers — `check.sh` reports `→ 000` for everything while the stack is
-perfectly healthy. Run it with `--local`.
+perfectly healthy. Run it with `--local`, or set `CHECK_LOCAL=1` in
+`workdir/.env` so that every run (including the one at the end of
+`update.sh`) probes through loopback.
 
 ### Pitfalls worth knowing in advance
 

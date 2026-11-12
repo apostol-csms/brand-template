@@ -28,7 +28,8 @@
 # while the TCP connection goes to loopback. The TLS check likewise
 # points openssl s_client at 127.0.0.1:443 while keeping -servername.
 # Needed on a VPS without hairpin NAT, where the host cannot reach its
-# own public IP — common with cheap providers. Off by default.
+# own public IP — common with cheap providers. Off by default; CHECK_LOCAL=1 in
+# workdir/.env turns it on for every run.
 #
 # Exit codes: 0 = all ok, 1 = at least one warn, 2 = at least one fail.
 
@@ -123,6 +124,14 @@ if [[ ! -f "$WORKDIR/.env" ]]; then
   OVERALL=2
 else
   load_env "$WORKDIR/.env"
+fi
+
+# CHECK_LOCAL=1 (also true/yes/on) in workdir/.env is --local for every run, manual or from
+# install.sh / update.sh: the setting of a host that cannot reach its own public address.
+if [[ $LOCAL -eq 0 ]]; then
+  case "${CHECK_LOCAL:-}" in
+    1|[Tt][Rr][Uu][Ee]|[Yy][Ee][Ss]|[Oo][Nn]) LOCAL=1 ;;
+  esac
 fi
 
 DOMAIN="${DOMAIN:-localhost}"
