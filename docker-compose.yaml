@@ -484,6 +484,11 @@ services:
       # Who may read /metrics (T1283): IP addresses or CIDRs of the collector, comma-separated, never a subnet
       # the edge nginx sits in. Empty = loopback only. Same variable as the backend's (workdir/.env).
       METRICS_ALLOW: ${METRICS_ALLOW:-}
+      # HTTP Basic for every station, not only those with a key of their own. `true`, `1` or `on` (any case) = on: a station
+      # without a key is refused with 401; a service started without a database then refuses every station (503), and
+      # the SOAP 1.5 entry is closed. Empty, absent or anything else = off (the per-station flag works as before).
+      # Read once at start; a site sets it in workdir/.env.
+      OCPP_BASIC_REQUIRED: ${OCPP_BASIC_REQUIRED:-}
     volumes:
       # T193 — /var/log/cs/error.log и /etc/cs/logs/postgres.log
       # переживают пересоздание. Второй — единственный носитель
