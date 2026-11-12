@@ -398,9 +398,9 @@ server {
 
     ssl_certificate /etc/letsencrypt/live/ocpp.${DOMAIN}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/ocpp.${DOMAIN}/privkey.pem;
-    include /etc/nginx/tls/rsa-ocpp.${DOMAIN}.conf;   # T716: RSA 2048 next to ECDSA (tls-rsa.sh)
+    include /etc/nginx/tls/rsa-ocpp.${DOMAIN}.conf;   # RSA 2048 next to ECDSA (tls-rsa.sh)
 
-    include /etc/nginx/includes/ssl-ocpp.conf;   # T716: certbot defaults + TLS_RSA_* (:7833 п. 6)
+    include /etc/nginx/includes/ssl-ocpp.conf;   # certbot defaults + TLS_RSA_*
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
     ssl_stapling off;
@@ -419,13 +419,13 @@ server {
     proxy_busy_buffers_size    64k;
     proxy_temp_file_write_size 64k;
 
-    # /Ocpp/ — OCPP 1.5 over SOAP (T330). The Central System takes it on
+    # /Ocpp/ — OCPP 1.5 over SOAP. The Central System takes it on
     # POST /Ocpp/CentralSystemService/<id> (CSService::do_post, parts[0] ==
     # "Ocpp" — the capital O is the protocol's, not a typo). Plain HTTP, so no
     # Upgrade/Connection pair here: the WebSocket locations below must not be
     # reused for it, and `location /` on ws. goes to the BACKEND, not to the
     # service — a SOAP station used to get an HTML page back. `^~` so no regex
-    # location ever takes it. Shape as soap.plugme.ru of the old contour.
+    # location ever takes it. Same shape as the legacy SOAP host.
     location ^~ /Ocpp/ {
         proxy_pass $ocpp_upstream;
         proxy_http_version 1.1;
@@ -453,8 +453,8 @@ server {
     # headers as /ocpp/, and it needs its OWN location: `location /` below
     # pins Connection to "keep-alive" and never forwards Upgrade, so a
     # handshake arriving there came back as the shell page — 200 text/html
-    # instead of 101 — and the console header sat on OFFLINE. Measured 05.09:
-    # 101 straight to the service on :9220, 200 through nginx (T152).
+    # instead of 101 — and the console header sat on OFFLINE. Measured:
+    # 101 straight to the service on :9220, 200 through nginx.
     #
     # A SEPARATE LOCATION, NOT A RELAXATION OF `location /`. Driving Connection
     # from a `map` in the shared block would switch the upgrade on for the
@@ -474,7 +474,7 @@ server {
     }
 
     # /metrics is the in-stack scrape address of the service (ocpp:9220, backend:4977): the collector reads it
-    # inside the stack, from an address in METRICS_ALLOW; the edge answers 404 on this host (T1283).
+    # inside the stack, from an address in METRICS_ALLOW; the edge answers 404 on this host.
     location = /metrics { return 404; }
 
     location / {
@@ -645,9 +645,9 @@ server {
 
     ssl_certificate /etc/letsencrypt/live/ws.${DOMAIN}/fullchain.pem; # managed by Certbot
     ssl_certificate_key /etc/letsencrypt/live/ws.${DOMAIN}/privkey.pem; # managed by Certbot
-    include /etc/nginx/tls/rsa-ws.${DOMAIN}.conf;   # T716: RSA 2048 next to ECDSA (tls-rsa.sh)
+    include /etc/nginx/tls/rsa-ws.${DOMAIN}.conf;   # RSA 2048 next to ECDSA (tls-rsa.sh)
 
-    include /etc/nginx/includes/ssl-ocpp.conf;   # T716: certbot defaults + TLS_RSA_* (:7833 п. 6)
+    include /etc/nginx/includes/ssl-ocpp.conf;   # certbot defaults + TLS_RSA_*
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
     ssl_stapling off;
@@ -681,13 +681,13 @@ server {
         proxy_read_timeout 86400;
     }
 
-    # /Ocpp/ — OCPP 1.5 over SOAP (T330). The Central System takes it on
+    # /Ocpp/ — OCPP 1.5 over SOAP. The Central System takes it on
     # POST /Ocpp/CentralSystemService/<id> (CSService::do_post, parts[0] ==
     # "Ocpp" — the capital O is the protocol's, not a typo). Plain HTTP, so no
     # Upgrade/Connection pair here: the WebSocket locations below must not be
     # reused for it, and `location /` on ws. goes to the BACKEND, not to the
     # service — a SOAP station used to get an HTML page back. `^~` so no regex
-    # location ever takes it. Shape as soap.plugme.ru of the old contour.
+    # location ever takes it. Same shape as the legacy SOAP host.
     location ^~ /Ocpp/ {
         proxy_pass $ocpp_upstream;
         proxy_http_version 1.1;
@@ -712,7 +712,7 @@ server {
     }
 
     # /metrics is the in-stack scrape address of the service (ocpp:9220, backend:4977): the collector reads it
-    # inside the stack, from an address in METRICS_ALLOW; the edge answers 404 on this host (T1283).
+    # inside the stack, from an address in METRICS_ALLOW; the edge answers 404 on this host.
     location = /metrics { return 404; }
 
     location / {

@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 #
 # check-primary.sh — refuse a brand primary that no text colour can sit on
-# (T610, DECISIONS.md:6899).
 #
 #   ./check-primary.sh <light|dark> <colour>   check one colour; empty = not set
 #   ./check-primary.sh --env <file>            BRANDING_{LIGHT,DARK}_PRIMARY_COLOR

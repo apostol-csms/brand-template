@@ -43,7 +43,7 @@ else
   : > "$REAL_IP_CONF"
 fi
 
-# T1229 П2 — the stations' upstream group. CS_NODES: comma-separated host:port of the cs nodes (one per compose
+# The stations' upstream group. CS_NODES: comma-separated host:port of the cs nodes (one per compose
 # service / VM); empty = one node `ocpp:9220`, the same as the fixed address before. least_conn: a station socket
 # lives for days, so connections are counted, not rotated. A node that fails to connect is skipped for 5 s
 # (max_fails=1 fail_timeout=5s; ignored with a single node): with max_fails=0 a silently dead VM has 0 connections,
@@ -80,7 +80,7 @@ envsubst '$DOMAIN $NGINX_PROXY_PROTO_OPTS' \
   < /etc/nginx/conf.d/default.conf.template \
   > /etc/nginx/conf.d/default.conf
 
-# T716 — the RSA pair next to ECDSA on the stations' hosts, when issued.
+# The RSA pair next to ECDSA on the stations' hosts, when issued.
 /usr/local/bin/tls-rsa
 
 # Start nginx
@@ -88,7 +88,7 @@ envsubst '$DOMAIN $NGINX_PROXY_PROTO_OPTS' \
 NGINX_PID=$!
 BG_PID=
 
-# T682 — stop. This script is PID 1, and PID 1 has no default action for SIGTERM: with no handler
+# Stop. This script is PID 1, and PID 1 has no default action for SIGTERM: with no handler
 # `docker stop` waited its 10 s and killed the container (exit 137), cutting every station's wss
 # hard. Now the signal reaches nginx as SIGQUIT (graceful: no new connections, workers finish);
 # a proxied WebSocket (proxy_read_timeout 86400) would hold its worker for a day, so after 5 s the
@@ -108,7 +108,7 @@ stop_edge() {
 }
 trap stop_edge TERM INT QUIT
 
-# T1179 — nginx is a child of this script. If it dies on its own (OOM kill, a failed master, a bad
+# Nginx is a child of this script. If it dies on its own (OOM kill, a failed master, a bad
 # reload) while PID 1 keeps looping, the container stays `running` with no edge, no health and no
 # restart (`restart: unless-stopped` fires only when PID 1 exits). edge_wait <pid> waits for the
 # background job <pid> OR for nginx, whichever ends first: its status goes to WAIT_RC; when it was

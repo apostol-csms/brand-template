@@ -102,8 +102,8 @@ fi
 #
 # default.conf.template ssl_certificate paths use per-subdomain
 # /etc/letsencrypt/live/<sub>.${DOMAIN}/fullchain.pem. That works when
-# every subdomain has its own cert directory (legacy chargemecar / OCPP
-# CSS layout). New deployments often use ONE multi-SAN cert covering
+# every subdomain has its own cert directory (the legacy
+# per-subdomain layout). New deployments often use ONE multi-SAN cert covering
 # every subdomain — only /etc/letsencrypt/live/${DOMAIN}/ exists, and
 # nginx fails to start because cloud.<domain>/, driver.<domain>/, etc.
 # don't exist.
@@ -121,7 +121,7 @@ if [[ -d "$LIVE_DIR" ]]; then
   # the same key appears twice and the LAST line is the one compose uses.
   # `head -1` here picked example.com, no live/example.com/ existed, and
   # the symlinks were silently skipped — nginx then died on
-  # live/cloud.<domain>/fullchain.pem (T323, first graftio install).
+  # live/cloud.<domain>/fullchain.pem.
   if [[ -f "$WORKDIR/.env" ]] && grep -qE '^DOMAIN=' "$WORKDIR/.env"; then
     DOMAIN="$(grep -E '^DOMAIN=' "$WORKDIR/.env" | tail -1 | cut -d= -f2-)"
     DOMAIN="${DOMAIN%\"}"; DOMAIN="${DOMAIN#\"}"   # strip quotes

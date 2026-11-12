@@ -62,15 +62,15 @@ fi
 : "${WORKDIR:?WORKDIR required}"
 COMPOSE="docker compose --env-file $WORKDIR/.env"
 
-# workdir/.env — это env_file для Docker, а НЕ сценарий оболочки. Docker берёт
-# всё после первого `=` буквально, поэтому значение законно может содержать
-# `;`, пробелы, кавычки и `$`. Исполнять такой файл через `.` нельзя: на
-# ocpp-css строка `BRANDING_MARK=data:image/svg+xml;base64,…` разрезалась по
-# `;`, хвост ушёл в оболочку как команда, и обновление встало.
+# workdir/.env is Docker's env_file, NOT a shell script. Docker takes everything
+# after the first `=` literally, so a value may legitimately contain `;`,
+# spaces, quotes and `$`. Such a file must not be sourced with `.`: a line like
+# `BRANDING_MARK=data:image/svg+xml;base64,…` is split at the `;`, the tail
+# goes to the shell as a command, and the update stops.
 #
-# Читаем только нужные ключи и берём ПОСЛЕДНЕЕ вхождение — именно его берёт
-# Docker, потому что install.sh не сливает шаблоны, а склеивает корневой с
-# посредовым, и приоритет держится порядком строк.
+# Read only the needed keys and take the LAST occurrence — Docker takes that
+# one, because install.sh does not merge the templates but concatenates the
+# root one with the per-env one, and precedence is held by line order.
 env_get() {
     sed -n "s/^$1=//p" "$WORKDIR/.env" | tail -1
 }

@@ -65,7 +65,7 @@ for s in cloud cpo cs admin driver pay auth api ws ocpp; do
   certbot certonly --standalone --non-interactive --agree-tos --email "$EMAIL" \
     --key-type ecdsa --cert-name "$s.$D" -d "$s.$D"
 done
-# RSA 2048 copies for the hosts stations connect to (T716) — see below
+# RSA 2048 copies for the hosts stations connect to — see below
 for s in ocpp ws; do
   certbot certonly --standalone --non-interactive --agree-tos --email "$EMAIL" \
     --key-type rsa --rsa-key-size 2048 --cert-name "$s.$D-rsa" -d "$s.$D"
@@ -141,7 +141,7 @@ Four values, and they are awkward to change later:
 |---|---|
 | **Brand code** | lowercase, `^[a-z0-9][a-z0-9-]*$`, ≤32 chars. Becomes `PROJECT_NAME`, the compose project, the volume prefix (`<code>_postgresql`), the OAuth2 audience and the vault filename. Keep it short and distinct from other brands' codes. |
 | **Display name** | what users see. Comes from the license, not from env — the frontends read it through the signed manifest. |
-| **Domain** | the deploy domain. It may differ from the brand's marketing domain (PlugMe is `plugme.ru` as a brand and `plugme.space` as a deployment) — the license carries the deploy one. |
+| **Domain** | the deploy domain. It may differ from the brand's marketing domain (a brand may be `example.com` while its deployment runs on `example.space`) — the license carries the deploy one. |
 | **Database name** | `PGDATABASE`. Not the same string as the config folder `csms`; pick something short, it ends up in every connection. |
 
 ### 1. Issue the license
@@ -247,8 +247,8 @@ archive/` symlinks and the 600 modes preserved — and you do.
 | `.env.template` `[R-0]` | only if you mirror images into your own registry |
 | `docker-compose.yaml` | remove services the brand does not have — `landing` if there is no marketing site, `stripe-cli` outside development |
 
-Drop the deploy launcher next to the others: copy `brands/plugme.sh`
-(the pure registry consumer) and set `ARC_NAME`, `SSH_HOST`, `ENV`, and
+Drop the deploy launcher next to the others: copy an existing brand launcher
+(the pure registry consumer) as `brands/<brand>.sh` and set `ARC_NAME`, `SSH_HOST`, `ENV`, and
 `PREVIEW_DOMAIN_FALLBACK` when the domain is not `<code>.com`.
 
 ### 7. Secrets

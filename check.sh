@@ -9,8 +9,8 @@
 #
 # Checks:
 #   [containers]  every compose service has a container, running + healthy
-#   [restart]     no long-running container with restart policy "no" (T393)
-#   [spa_env]     frontend/driver/pay/auth carry no secret-looking variable names (T174)
+#   [restart]     no long-running container with restart policy "no"
+#   [spa_env]     frontend/driver/pay/auth carry no secret-looking variable names
 #   [postgres]    pg_isready from inside the container
 #   [api]         GET https://cloud.${DOMAIN}/api/v1/ping → 200
 #   [auth]        GET https://auth.${DOMAIN}/login → 200 (sign-in page)
@@ -152,10 +152,10 @@ set_resolve() {
 # check_restart.
 ONE_SHOT=" db-init db-migrate "
 
-# T394 — the list of what SHOULD run comes from compose, not from `docker ps`.
+# The list of what SHOULD run comes from compose, not from `docker ps`.
 # Without -a a stopped container simply vanishes from `ps`, and the check used
-# to stay green: that is how frontend/landing/pay lay dead on the ocpp-css prod
-# on 23.09 (T393) while this reported "services up".
+# to stay green: that is how a stopped frontend/landing/pay went unnoticed while this
+# reported "services up".
 check_containers() {
   if ! command -v docker >/dev/null 2>&1; then
     record containers fail "docker not found"; return
@@ -193,10 +193,10 @@ check_containers() {
   fi
 }
 
-# T393 — every long-running container must come back after a Docker daemon
-# restart or a reboot. On 23.09 an `apt upgrade` restarted dockerd on the
-# ocpp-css prod; frontend, landing and pay had no `restart:` in compose
-# (policy "no"), stayed down and cloud. answered 502 for 36 minutes.
+# Every long-running container must come back after a Docker daemon
+# restart or a reboot. An `apt upgrade` that restarts dockerd leaves down every
+# container whose restart policy is "no": the frontends stay down and
+# cloud. answers 502.
 # One-shot jobs (ONE_SHOT above) are exempt: they exit by design.
 
 check_restart() {
@@ -220,7 +220,7 @@ check_restart() {
   fi
 }
 
-# T174 — a static front must not carry the site's secrets. frontend, driver,
+# A static front must not carry the site's secrets. frontend, driver,
 # pay and auth take no env_file in compose; this notices the day someone puts
 # it back (or names a secret under `environment:`). Names only — a value is
 # never read into the report.
@@ -237,7 +237,7 @@ check_spa_env() {
     [[ -n "$NAMES" ]] && BAD+="${BAD:+; }$SVC: ${NAMES%,}"
   done
   if [[ -n "$BAD" ]]; then
-    record spa_env warn "secret-looking variables in a front's environment (T174): $BAD"
+    record spa_env warn "secret-looking variables in a front's environment: $BAD"
   elif [[ $SEEN -eq 0 ]]; then
     record spa_env warn "no frontend/driver/pay/auth container to inspect"
   else

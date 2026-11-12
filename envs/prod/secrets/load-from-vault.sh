@@ -195,11 +195,11 @@ MANDATORY=(
   POSTGRES_PASSWORD
   DB_PASS_KERNEL DB_PASS_ADMIN DB_PASS_DAEMON DB_PASS_APIBOT DB_PASS_MAILBOT
   DB_PASS_OCPP DB_PASS_OCPI DB_PASS_HTTP DB_PASS_CPO DB_PASS_DRIVER
-  # The pooler's own role (T176): .docker/pgbouncer refuses to start without
+  # The pooler's own role: .docker/pgbouncer refuses to start without
   # it and db-init creates the role from it. It sat in .env.template as
   # CHANGE_ME and in no dispatcher, so a clean install died at install.sh's
   # CHANGE_ME gate while running deployments hid it — the value had been put
-  # into workdir/.env by hand (2026-09-14, chargemecar stage from scratch).
+  # into workdir/.env by hand.
   DB_PASS_PGBOUNCER
   OAUTH2_SECRET_SERVICE OAUTH2_SECRET_WEB OAUTH2_SECRET_ANDROID
   OAUTH2_SECRET_IOS OAUTH2_SECRET_OCPP
@@ -220,7 +220,7 @@ OPTIONAL=(
   YANDEX_CLIENT_ID YANDEX_CLIENT_SECRET
   STRIPE_API_KEY STRIPE_SECRET_KEY STRIPE_PUBLISHABLE_KEY STRIPE_WEBHOOK_SECRET
   # Connect: second webhook endpoint (events on connected accounts) and
-  # OAuth for Standard accounts (T280/T282). Seeded into the registry by
+  # OAuth for Standard accounts. Seeded into the registry by
   # db-init only; on a running database they are written by hand.
   STRIPE_CONNECT_WEBHOOK_SECRET STRIPE_CONNECT_CLIENT_ID STRIPE_CONNECT_REDIRECT_URI
   YOOKASSA_SHOP_KEY YOOKASSA_OAUTH_CLIENT_SECRET

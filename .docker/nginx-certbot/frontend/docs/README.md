@@ -29,7 +29,7 @@ and then fails to fetch its own specification.
 
 This one lives on the app subdomains. A brand may also publish a public API
 reference on its landing (`<domain>/docs`) — see the `docs.vue` page in the
-chargemecar and ocpp-css landing repos. Both read the same generated
+brand landing repos. They read the same generated
 specification, so they cannot drift apart.
 
 ## Assets

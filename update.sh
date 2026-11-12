@@ -31,25 +31,25 @@
 #   8. docker compose build — landing + local infra (nginx, pgbouncer);
 #      with --frontend-only, landing alone
 #   9. docker compose run --rm --no-deps db-migrate   ← blocking gate
-#      (postgres is started if down but never recreated here — T711)
+#      (postgres is started if down but never recreated here)
 #      (on failure: exit 2, stack keeps running at old version)
 #      (then: create the pg_stat_statements extension where its library is
 #      preloaded; a failure only warns)
 #  10. rolling restart, TWO-PHASE: upstreams → wait until SPAs report healthy
 #      → only then nginx (see the comment at rolling_restart for why). Inside
 #      phase 1 ocpp waits for backend: it is recreated only once the new
-#      backend is subscribed to LISTEN (see wait_backend_listening, T578).
+#      backend is subscribed to LISTEN.
 #      platform-service (the Go /api/v2 service, profile `gateway`) rides
 #      phase 1a last, after backend + pgbouncer — filter_present_services
-#      drops it automatically where the profile is off (T752)
+#      drops it automatically where the profile is off
 #  11. hooks/post-update.sh
 #  12. record version (and prev, for --rollback)
 #      — then report postgres config this run left unapplied (a new image,
 #      a changed `-c` setting): postgres is never recreated here. Report only.
 #  13. ./check.sh — note it exits 1 on a mere warning, and this step turns
 #      that into exit 2 for the whole update
-#  14. remove platform images of versions other than current and previous
-#      (T710), then docker image prune -f
+#  14. remove platform images of versions other than current and previous,
+#      then docker image prune -f
 
 set -euo pipefail
 
@@ -295,8 +295,8 @@ rebuild_local() {
   else
     SERVICES="landing nginx pgbouncer"
   fi
-  # Drop services not declared in this brand's compose (e.g. plugme has
-  # no landing). Skip build entirely if nothing remains buildable.
+  # Drop services not declared in this brand's compose (e.g. a brand
+  # without a landing). Skip build entirely if nothing remains buildable.
   SERVICES="$(filter_present_services "$SERVICES")"
   if [[ -z "$SERVICES" ]]; then
     log "docker compose build: (no buildable services declared — skipping)"
@@ -314,10 +314,10 @@ run_db_migrate() {
     log "skip db-migrate (--frontend-only)"
     return 0
   fi
-  # T711 — `compose run` without --no-deps walks depends_on (db-migrate →
+  # `compose run` without --no-deps walks depends_on (db-migrate →
   # db-init → postgres) and RECREATES postgres whenever its config-hash
-  # label disagrees with the current render — measured 30.09 on all four
-  # sites: postgres was recreated on every update, image unchanged, while
+  # label disagrees with the current render — measured on every
+  # site: postgres was recreated on every update, image unchanged, while
   # backend and ocpp were still running on the old version (they lost the
   # database under them), and postgres' json log — its only log,
   # logging_collector=off — went with the old container. So: make sure
@@ -351,7 +351,7 @@ run_db_migrate() {
 # auth SPA is the canonical symptom). Sequence:
 #
 #   Phase 1: --force-recreate upstreams (backend, SPAs, pg*), then —
-#            once backend listens — ocpp (the LISTEN gate below, T578).
+#            once backend listens — ocpp.
 #            Wait until every SPA reports healthy (from its
 #            `x-spa-healthcheck` in docker-compose.yaml).
 #   Phase 2: --force-recreate nginx. Its resolver cache starts fresh
@@ -367,7 +367,7 @@ WAIT_HEALTHY_MAX_S=120
 
 # Filter SPA_SERVICES + UPSTREAM lists down to services actually present
 # in the brand's docker-compose.yaml. Brands that omit `landing` (e.g.
-# plugme) would otherwise hard-fail rolling_restart with "no such service".
+# a brand without a public site) would otherwise hard-fail rolling_restart with "no such service".
 filter_present_services() {
   local LIST="$1" PRESENT="" ALL
   ALL="$(compose_cmd config --services 2>/dev/null)"
@@ -382,7 +382,7 @@ filter_present_services() {
 # wait_services_healthy <label> <services> <on-timeout hint>
 # A service is ready when it runs and is either healthy or has no healthcheck at all — the same rule as
 # check.sh [containers] (`State == running` and `Health` empty or `healthy`), so a green wait is a green
-# check. Anything else — `starting`, `unhealthy`, `state:restarting`, `absent` — is pending. T1238: the wait used
+# check. Anything else — `starting`, `unhealthy`, `state:restarting`, `absent` — is pending. The wait used
 # to cover the SPAs only; ocpp (start_period 30 s) and platform-service were still `starting` when check.sh ran
 # right after phase 1/2 → a false "✗ containers" that went green a minute later.
 wait_services_healthy() {
@@ -420,7 +420,7 @@ wait_spas_healthy() {
     "nginx phase SKIPPED — old nginx keeps routing."
 }
 
-# ─── Backend LISTEN gate (T578) ──────────────────────────────────────
+# ─── Backend LISTEN gate ──────────────────────────────────────
 #
 # ocpp goes up only after the new backend has subscribed. A fresh ocpp
 # takes every station's reconnect at once, and each one runs OCPP logic in
@@ -428,12 +428,12 @@ wait_spas_healthy() {
 # a Get* command to a station — is an http.request row announced by NOTIFY
 # on channel "http" and picked up by backend's PGFetch. With nobody
 # listening the NOTIFY is simply gone and the row stays in state 1 for good
-# (cpms 28.09: stations were back 2–3 s before backend listened, 27 rows
-# stranded, two of them captures; T577 is the fix on the backend side, this
-# gate is the second line). Hence, inside phase 1:
+# (stations were back 2–3 s before backend listened, rows stranded, some of
+# them captures). A backend-side fix (PGFetch rescans the queue at start)
+# covers the same case; this gate is the second line. Hence, inside phase 1:
 #
 #   1a. recreate every upstream except ocpp — backend together with
-#       pgbouncer, as brands/CLAUDE.md requires;
+#       pgbouncer (restarting pgbouncer alone leaves some listeners deaf);
 #   1b. wait until the NEW backend listens: a listener connection opened
 #       after 1a carries channel "http", and every database user holds at
 #       least as many listener connections as it did before 1a;
@@ -442,7 +442,7 @@ wait_spas_healthy() {
 # What the gate does NOT close: while backend itself restarts in 1a, the old
 # ocpp keeps working, and an http.request it queues in those seconds (a
 # StopTransaction's capture) still loses its NOTIFY. That window is ordinary
-# traffic, not the reconnect burst — only T577 (PGFetch rescans the queue at
+# traffic, not the reconnect burst — only the backend-side fix (PGFetch rescans the queue at
 # start) closes it. Also, the old ocpp goes through pgbouncer, which is
 # recreated in 1a under it: idle connections reconnect, an in-flight query
 # fails once and the station repeats its message.
@@ -511,7 +511,7 @@ wait_backend_listening() {
     exit 2
   fi
   warn "backend listens on \"$LISTEN_CHANNEL\", but holds fewer listener connections than before:$short"
-  warn "  proceeding with ocpp; check the subscriptions as brands/CLAUDE.md describes (pgbouncer rule)"
+  warn "  proceeding with ocpp; check the listener subscriptions (pgbouncer was recreated)"
 }
 
 rolling_restart() {
@@ -549,7 +549,7 @@ rolling_restart() {
   wait_spas_healthy
   log "rolling restart (phase 2 — nginx)"
   run compose_cmd up -d --no-deps --force-recreate nginx
-  RECREATED="$UPSTREAM ${LATE:+$LATE }nginx"   # T1238: verify_update waits for these before check.sh looks at them
+  RECREATED="$UPSTREAM ${LATE:+$LATE }nginx"   # verify_update waits for these before check.sh looks at them
 }
 
 # ─── Step 9b: Patch baseline ─────────────────────────────────────────
@@ -757,7 +757,7 @@ render_app_env() {
 # ─── Step 12: Verify ─────────────────────────────────────────────────
 
 verify_update() {
-  # T1238: ocpp (start_period 30 s), backend (60 s), platform-service were still `starting` when check.sh ran right after
+  # ocpp (start_period 30 s), backend (60 s), platform-service were still `starting` when check.sh ran right after
   # the rolling restart → a false "✗ containers" that went green a minute later. Wait here, AFTER record_version and the
   # hooks (an exit 2 above would leave the version file stale), with the readiness rule of check.sh [containers].
   if [[ -n "${RECREATED:-}" ]]; then
@@ -778,9 +778,9 @@ verify_update() {
 # ─── Step 13: Cleanup ────────────────────────────────────────────────
 
 prune_images() {
-  # T710 — `image prune -f` removes only dangling layers; every release left
-  # a full set of tagged platform images behind (30.09: 257 images, 23.4 GB
-  # reclaimable on prod ocpp-css, 280 on chargemecar, 232 on cpms). Keep the
+  # `image prune -f` removes only dangling layers; every release left
+  # a full set of tagged platform images behind (hundreds of images, tens of
+  # GB reclaimable on a long-lived site). Keep the
   # version just installed and the previous one (--rollback brings it back
   # without a pull); remove the platform images of every other version.
   # No -f on rmi: an image a container (even a stopped one) still uses
@@ -799,7 +799,7 @@ prune_images() {
     fi
     PLATFORM_RE='/csms-(backend|ocpp|db|webapp|driver|pay|auth|ai-service|platform-service):[0-9]+\.[0-9]+\.[0-9]+'
     # only the repositories THIS stack pulls — another stack on the same host
-    # (graftio on the owner's workstation) keeps its images
+    # (for example a second brand on a shared host) keeps its images
     REPOS="$(compose_cmd config --images 2>/dev/null | sed 's/@.*//; s/:[^:/]*$//' | sort -u)"
     OLD="$(docker images --format '{{.Repository}}:{{.Tag}}' | grep -E "$PLATFORM_RE" \
       | awk -F: -v cur="$PLATFORM_VERSION" -v prev="$PREV_VER" '$NF != cur && $NF != prev' \

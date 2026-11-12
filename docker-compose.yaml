@@ -37,7 +37,7 @@
 # original csms_* ones. Months of accumulated postgres data would still
 # exist on disk but be invisible to the running stack. Refuse to start
 # at all when the value is missing.
-name: '${PROJECT_NAME:?PROJECT_NAME must be set in workdir/.env (use the brand code, e.g. plugme / ocpp-css)}'
+name: '${PROJECT_NAME:?PROJECT_NAME must be set in workdir/.env (use the brand code, e.g. acme)}'
 
 # ─── SPA healthcheck (shared via YAML anchor) ─────────────────
 #
@@ -90,7 +90,7 @@ services:
       # Trusted edge: restore the real client IP (PROXY protocol or XFF).
       NGINX_PROXY_PROTOCOL: ${NGINX_PROXY_PROTOCOL:-}
       NGINX_REAL_IP_TRUSTED: ${NGINX_REAL_IP_TRUSTED:-}
-      # The stations' upstream: comma-separated host:port of the cs nodes (T1229 П2); empty = ocpp:9220.
+      # The stations' upstream: comma-separated host:port of the cs nodes; empty = ocpp:9220.
       CS_NODES: ${CS_NODES:-}
     networks:
       wan-network:
@@ -124,7 +124,7 @@ services:
     # Wait for each SPA to pass its HTTP healthcheck before nginx is
     # allowed to route traffic. Prevents bare-domain ↔ auth confusion
     # after rolling restart (see x-spa-healthcheck comment above).
-    # backend and ocpp have /readyz healthchecks (T1172), but nginx stays on
+    # backend and ocpp have /readyz healthchecks, but nginx stays on
     # service_started for both: an unreachable database at boot must not keep
     # nginx down.
     depends_on:
@@ -138,10 +138,10 @@ services:
     restart: unless-stopped
     volumes:
       - letsencrypt:/etc/letsencrypt
-      # T193 — журналы переживают пересоздание контейнера.
-      # Без этих томов ws_access.log / ocpp_access.log / expert-archive.log
-      # и история продления сертификатов лежат в записываемом слое и
-      # исчезают на каждой раскатке (update.sh --force-recreate).
+      # Logs survive a container recreate.
+      # Without these volumes ws_access.log / ocpp_access.log / expert-archive.log
+      # and the certificate renewal history sit in the writable layer and
+      # vanish on every rollout (update.sh --force-recreate).
       - logs-nginx:/var/log/nginx
       - logs-certbot:/var/log/letsencrypt
 
@@ -192,7 +192,7 @@ services:
     # (200) server connections, apibot (~64 slots with WORKER_PROCESSES=8)
     # connects to postgres directly around it, and
     # superuser_reserved_connections (3) is held back — ~267, which 200
-    # does not cover (T1186).  At ~10 MB per idle slot 300 is still within
+    # does not cover.  At ~10 MB per idle slot 300 is still within
     # reach on a 4+ GB host.  Revisit if WORKER_PROCESSES is tuned above 16.
     #
     # `search_path` is set per-database via ALTER DATABASE in the
@@ -241,21 +241,21 @@ services:
       - "max_parallel_workers=${PG_MAX_PARALLEL_WORKERS:-2}"
       - "-c"
       - "max_parallel_workers_per_gather=${PG_MAX_PARALLEL_WORKERS_PER_GATHER:-1}"
-      # pg_stat_statements is how the OCPP hot path was profiled on 2026-08-07;
-      # without it the 268 ms per message that a VOLATILE function in a WHERE
-      # clause was costing is invisible — pg_stat_activity only ever showed the
+      # pg_stat_statements is how the OCPP hot path is profiled;
+      # without it the per-message cost of a VOLATILE function in a WHERE
+      # clause is invisible — pg_stat_activity only ever showed the
       # outer ocpp.parse() call. Overhead is a couple of percent. Set
       # `pg_stat_statements.track = all` (ALTER SYSTEM) when profiling inside
       # PL/pgSQL; the default only counts top-level statements.
       - "-c"
       - "shared_preload_libraries=pg_stat_statements"
-    # T711 — no env_file here. The image reads only POSTGRES_* (below), and
+    # No env_file here. The image reads only POSTGRES_* (below), and
     # workdir/.env gets PLATFORM_VERSION rewritten on every release: through
     # env_file that changed postgres' config hash each time, so any compose
     # call that reached it (`run db-migrate`, docker-up.sh, a spot repair
     # without --no-deps) recreated the database under a running backend and
     # threw its log away. It also handed every brand secret to the database
-    # container (T174). Takes effect on the next deliberate recreate.
+    # container. Takes effect on the next deliberate recreate.
     environment:
       POSTGRES_DB: ${PGDATABASE:-csms}
       POSTGRES_USER: postgres
@@ -394,7 +394,7 @@ services:
       PGUSERAPI: apibot
       PGSERVICEFILE: /etc/csms/pg_service.conf
       PGSERVICE: csms
-      # Track A gateway (T592). Off unless the brand turns it on: `/api/v2`
+      # Track A gateway. Off unless the brand turns it on: `/api/v2`
       # then goes to platform-service (profile `gateway` below). An unset
       # variable already meant off (module default); the explicit false only
       # says so.
@@ -407,7 +407,7 @@ services:
       # `network_mode: host` or an explicit `hostname:` (GatewayAPI README).
       GATEWAY_ENABLE: ${GATEWAY_ENABLE:-false}
       GATEWAY_ALLOWED_CIDR: ${GATEWAY_ALLOWED_CIDR:-}
-      # T1007/T1105: one active copy per background role (the helper PGFetch/
+      # One active copy per background role (the helper PGFetch/
       # PGFile, TaskScheduler, ReportServer, LicenseServer, MessageServer):
       # a second backend on the same database stays a standby instead of
       # repeating their outbound calls, jobs and letters. On by default; the
@@ -419,13 +419,13 @@ services:
     volumes:
       - tmp:/tmp/csms
       - files:/etc/csms/files
-      # T193 — error.log + postgres.log переживают пересоздание.
+      # The files error.log and postgres.log survive a recreate.
       - logs-backend:/var/log/csms
       # License envelope — read by both process-LicenseServer (Phase 3a)
       # and module-LicenseServer (Phase 3b) at boot + on mtime change.
       - ./conf/license.json:/etc/csms/conf/license.json:ro
       - ./.docker/libpq/pg_service.conf:/etc/csms/pg_service.conf:ro
-    # T1172 (T034): readiness of the backend = SELECT 1 through the worker's
+    # Readiness of the backend = SELECT 1 through the worker's
     # pool (/readyz, 503 while the database role is lost). A red probe only
     # changes the status (docker restarts nothing); nginx and platform-service
     # stay on service_started on purpose, so an unreachable database at boot
@@ -475,13 +475,13 @@ services:
       PGUSERAPI: apibot
       API_HOST: cloud.${DOMAIN:-localhost}
       OCPP_HOST: cs.${DOMAIN:-localhost}
-      # T590 Ш6 (T419): workers and the PostgreSQL pool of EACH worker. The image sets 2/4/4 (T1183: max = min until the K7 measure), but an EMPTY compose
+      # Workers and the PostgreSQL pool of EACH worker. The image sets 2/4/4 (max = min until measured), but an EMPTY compose
       # value is an absent key and falls to libapostol's 1/5, so every line carries its own default. The default is 2
-      # workers (T1335; the image says the same), a site pins its own W in workdir/.env; the workers of one node pass commands to each other over IPC whatever the transport. CS_NODE / CS_NODE_URL are not set: one cs per brand.
+      # workers (the image says the same), a site pins its own W in workdir/.env; the workers of one node pass commands to each other over IPC whatever the transport. CS_NODE / CS_NODE_URL are not set: one cs per brand.
       CS_WORKERS: ${CS_WORKERS:-2}
       CS_POOL_MIN: ${CS_POOL_MIN:-4}
       CS_POOL_MAX: ${CS_POOL_MAX:-4}
-      # Who may read /metrics (T1283): IP addresses or CIDRs of the collector, comma-separated, never a subnet
+      # Who may read /metrics: IP addresses or CIDRs of the collector, comma-separated, never a subnet
       # the edge nginx sits in. Empty = loopback only. Same variable as the backend's (workdir/.env).
       METRICS_ALLOW: ${METRICS_ALLOW:-}
       # HTTP Basic for every station, not only those with a key of their own. `true`, `1` or `on` (any case) = on: a station
@@ -490,13 +490,12 @@ services:
       # Read once at start; a site sets it in workdir/.env.
       OCPP_BASIC_REQUIRED: ${OCPP_BASIC_REQUIRED:-}
     volumes:
-      # T193 — /var/log/cs/error.log и /etc/cs/logs/postgres.log
-      # переживают пересоздание. Второй — единственный носитель
-      # номера счёта из URL станции (пятый аргумент ocpp.parse): в базе
-      # его нет, и без тома приёмка T196 не имеет чем подтвердиться.
+      # /var/log/cs/error.log and /etc/cs/logs/postgres.log survive a recreate.
+      # The second is the only carrier of the account number from the station
+      # URL (fifth argument of ocpp.parse): the database does not keep it.
       - logs-ocpp:/var/log/cs
       - logs-ocpp-pg:/etc/cs/logs
-    # T1172 (T034, T1173): readiness of the Central System = SELECT 1 through
+    # Readiness of the Central System = SELECT 1 through
     # the worker's pool (/readyz on the ocpp port; 503 while the database role
     # is lost). A red probe only changes the status (docker restarts nothing);
     # nginx stays on service_started, as for backend.
@@ -526,11 +525,11 @@ services:
   # fork of csms-{webapp,driver,pay} via their own CI.
   #
   # `landing` is brand-specific (per-brand <brand>/landing repo, e.g.
-  # ocpp-css/landing) — kept as `build:` here.  Comment-out + uncomment
+  # acme/landing) — kept as `build:` here.  Comment-out + uncomment
   # the service to match what your brand has bootstrapped.
 
   # `landing` is brand-specific (per-brand <brand>/landing repo, e.g.
-  # chargemecar/landing or ocpp-css/landing). Each landing repo carries
+  # acme/landing). Each landing repo carries
   # its own .github/workflows/release.yml that builds the Nuxt SPA,
   # pushes :latest + :sha-<short> to ghcr.io/<brand>/landing, then SSHes
   # into the brand server and recreates the landing container.
@@ -539,7 +538,7 @@ services:
   # landing repo lives in a GitHub org name different from PROJECT_NAME
   # (e.g. landing repo is in `acme-marketing` while PROJECT_NAME=acme).
   #
-  # If your brand has no landing repo (e.g. plugme), comment this whole
+  # If your brand has no landing repo (e.g. a brand without a public site), comment this whole
   # service out — nginx default-config has a landing-conditional fallback
   # that redirects bare DOMAIN to cloud.${DOMAIN} when landing is absent.
   #
@@ -572,7 +571,7 @@ services:
         required: false
     healthcheck: *spa-healthcheck
 
-  # T174 — the four SPA services take NO env_file. They are static nginx
+  # The four SPA services take NO env_file. They are static nginx
   # (driver, auth) and two Node servers (frontend, pay) whose brand values
   # come from the signed manifest or the build; `env_file: workdir/.env`
   # put every database password, CURRENT_KEY and OAuth2 secret of the site
@@ -691,20 +690,20 @@ services:
   #
   # Compose starts it on the profile alone (COMPOSE_PROFILES lists every
   # profile the brand uses, e.g. vpn,gateway). Turn the profile on only
-  # together with GATEWAY_ENABLE=true on the backend — both by the owner's
-  # word per brand: with the gateway off platform-service restarts in a loop
+  # together with GATEWAY_ENABLE=true on the backend — both decided
+  # per brand: with the gateway off platform-service restarts in a loop
   # and check.sh fails the update. Image csms-platform-service is published
-  # by the apostol-csms/go release.yml since T752 and pinned by
+  # by the apostol-csms/go release.yml and pinned by
   # PLATFORM_VERSION like the rest of the csms-* family (override
   # PLATFORM_SERVICE_IMAGE for a local build, e.g. dev without a published
   # tag). update.sh recreates the service in phase 1a together with
-  # backend/pgbouncer. Its daemon pool (the `daemon` role, T798) shares
+  # backend/pgbouncer. Its daemon pool shares
   # pgbouncer's max_db_connections with apibot and ocpp. Environment as in
   # the root docker-compose.yaml of the workspace; the control socket stays
   # on lan-network, the database is
   # reached as daemon through pgbouncer (session pool mode) — NOT apibot: the
   # tenant gate and the method-right check of CheckObjectAccess /
-  # ExecuteMethod are skipped for session_user apibot (T798).
+  # ExecuteMethod are skipped for session_user apibot.
   platform-service:
     image: ${PLATFORM_SERVICE_IMAGE:-${REGISTRY:-ghcr.io/apostol-csms}/csms-platform-service:${PLATFORM_VERSION:-latest}}
     pull_policy: ${PLATFORM_SERVICE_PULL_POLICY:-always}
@@ -745,25 +744,26 @@ networks:
 
 volumes:
   letsencrypt:
-  # T193 — журналы приложений и nginx. Именованные тома, потому что
-  # записываемый слой контейнера умирает на каждом --force-recreate,
-  # то есть окно наблюдаемости равнялось времени с последней раскатки.
+  # Application and nginx logs. Named volumes, because the container's writable
+  # layer dies on every --force-recreate, so the observability window would
+  # equal the time since the last rollout.
   #
-  # РОТАЦИЯ. У backend и ocpp она СВОЯ, внутри libapostol, а не logrotate:
+  # ROTATION. backend and ocpp have their OWN, inside libapostol, not logrotate:
   # APP_DEFAULT_LOG_MAX_SIZE=104857600 (CMakeLists), log_keep_rotated=5,
-  # log_compress=true, FileTarget::rotate() по current_size_ >= max_size_.
-  # В брендах не переопределяется. Значит logs-backend / logs-ocpp /
-  # logs-ocpp-pg ОГРАНИЧЕНЫ: ~100 МБ живого файла плюс пять сжатых.
-  # Неограниченно растёт ТОЛЬКО logs-nginx: в образе nginx logrotate нет,
-  # ws_access.log / ocpp_access.log / expert-archive.log не ротирует ничто.
-  # Рост там медленный (~0,3 МБ в сутки на боевой), но верхней границы нет.
+  # log_compress=true, FileTarget::rotate() on current_size_ >= max_size_.
+  # Brands do not override it. So logs-backend / logs-ocpp / logs-ocpp-pg are
+  # BOUNDED: ~100 MB of live file plus five compressed. ONLY logs-nginx grows
+  # without bound: the nginx image has no logrotate, and nothing rotates
+  # ws_access.log / ocpp_access.log / expert-archive.log. Growth there is slow,
+  # but there is no upper bound.
   #
-  # ЛОВУШКА, если возьмётесь за ротацию nginx. Содержимое /var/log/nginx
-  # копируется в том ОДИН раз, при создании тома, вместе с симлинками
-  # access.log -> /dev/stdout и error.log -> /dev/stderr. `rm *.log` внутри
-  # тома удалит и их; nginx создаст на их месте обычные файлы, и docker logs
-  # nginx замолчит НАВСЕГДА — без ошибки и без строки в журнале. logrotate
-  # здесь только с copytruncate либо с явным исключением этих двух имён.
+  # TRAP if you take up nginx rotation. The contents of /var/log/nginx are
+  # copied into the volume ONCE, at volume creation, together with the symlinks
+  # access.log -> /dev/stdout and error.log -> /dev/stderr. `rm *.log` inside
+  # the volume deletes them too; nginx then creates plain files in their place
+  # and docker logs of nginx goes silent FOREVER — no error and no log line.
+  # logrotate here only with copytruncate or with those two names explicitly
+  # excluded.
   logs-nginx:
   logs-certbot:
   logs-backend:

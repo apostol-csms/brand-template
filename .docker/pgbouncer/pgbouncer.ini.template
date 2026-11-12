@@ -1,6 +1,6 @@
 [databases]
-; The database the pooler logs into (T1229 П1): the compose service `postgres` unless PG_UPSTREAM_HOST says otherwise
-; (an external database, a Patroni balancer; docs/wiki/common/deployment-scenarios-n-binaries.md § 5).
+; The database the pooler logs into: the compose service `postgres` unless PG_UPSTREAM_HOST says otherwise
+; (an external database, a Patroni balancer).
 ${DB_NAME} = host=${PG_UPSTREAM_HOST} port=${PG_UPSTREAM_PORT}
 
 [pgbouncer]
@@ -29,7 +29,7 @@ default_pool_size = ${PGBOUNCER_DEFAULT_POOL_SIZE}
 ; Ceiling on server connections to the database, across all pools.
 ; default_pool_size is per (database, user) pair, so without this the
 ; theoretical total is pool_size x number of pooled roles — 1050 at the default
-; 150 against the stock max_connections of 200 (the templates set 300, T1231). Also note apibot connects to postgres DIRECTLY
+; 150 against the stock max_connections of 200. Also note apibot connects to postgres DIRECTLY
 ; (PGHOSTAPI in compose), roughly 64 slots with WORKER_PROCESSES=8, so
 ; pgbouncer's share has to leave room for it.
 max_db_connections = ${PGBOUNCER_MAX_DB_CONNECTIONS}
@@ -37,7 +37,7 @@ max_db_connections = ${PGBOUNCER_MAX_DB_CONNECTIONS}
 ; cached error for this long, without trying to log in again. The default is
 ; 15 s: after a failover the old primary refuses the first login («the database
 ; system is shutting down»), and the pool stays cut off for 15 s although the
-; new primary already writes (T1123, measured on the k11 stand: 16:38:19 -> :34).
+; new primary already writes (measured on a test stand: 16:38:19 -> :34).
 ; One second costs one login attempt per pool per second while the database is
-; down (T1143).
+; down.
 server_login_retry = 1

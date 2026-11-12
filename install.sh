@@ -326,7 +326,7 @@ preflight() {
   #    presence of conf/license.json.example in the repo (added by
   #    Phase-3a wiring); if present, license.json must also be in
   #    .secrets/ on first install.  This keeps backward compat for
-  #    pre-license brands like the chargemecar 0.9.x cohort.
+  #    pre-license brands like the 0.9.x cohort.
   if [[ -f "$SCRIPT_DIR/conf/license.json.example" ]]; then
     if [[ ! -f "$PARENT/.secrets/license.json" ]]; then
       err "$PARENT/.secrets/license.json not found (license-aware brand)"
@@ -424,12 +424,10 @@ merge_env() {
 # the env later does not move it; only a reinstall does.
 #
 # So a blank or defaulted value here is not a cosmetic gap, it is a
-# denomination decision made by accident. ChargeMeCar's stage installed with
-# the root template's USD placeholder and ran that way unnoticed: 29 accounts
-# and all monthly prices in USD on a EUR brand, plus a legacy fleet.kwh row at
-# 0.68 — the same two-orders-of-magnitude error P00000018's header warns about,
-# wearing a different currency label. Nothing failed, because a plausible wrong
-# answer is indistinguishable from a right one at install time.
+# denomination decision made by accident. An install with the root template's
+# USD placeholder ran that way unnoticed: accounts and monthly prices in USD on
+# a EUR brand and a per-kWh rate far off. Nothing failed, because a plausible
+# wrong answer is indistinguishable from a right one at install time.
 #
 # The list is deliberately minimal — exactly the values that have no safe
 # default and are consumed by the seed. PROJECT_LOCALE keeps its 'en' default;
@@ -483,12 +481,12 @@ load_secrets() {
   chmod 600 "$WORKDIR/.env"
 }
 
-# ─── Step 6b: Brand primary colour (T610) ───────────────────────────
+# ─── Step 6b: Brand primary colour ───────────────────────────
 #
 # BRANDING_{LIGHT,DARK}_PRIMARY_COLOR is seeded into db.brand_manifest at
 # first boot and nothing re-syncs it. A primary on which neither white nor
 # the theme's dark ink reaches 4.5:1 would put sub-AA text on every button,
-# so it is refused here, before anything starts (DECISIONS.md:6899). The
+# so it is refused here, before anything starts. The
 # rule and its inks are the fronts' — see check-primary.sh.
 
 validate_brand_colors() {
@@ -566,7 +564,7 @@ pull_images() {
   # PLATFORM_VERSION from workdir/.env automatically.  Brand-specific
   # `landing` (build: context) is skipped by --ignore-buildable.
   # Profile-restricted services are not in the default pull set — with
-  # the `gateway` profile on (new brands since T752), pull
+  # the `gateway` profile on (new brands), pull
   # platform-service explicitly so the first boot never meets a missing
   # image.
   run docker compose --env-file "$WORKDIR/.env" pull --ignore-buildable
