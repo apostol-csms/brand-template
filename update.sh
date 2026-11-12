@@ -33,6 +33,8 @@
 #   9. docker compose run --rm --no-deps db-migrate   ← blocking gate
 #      (postgres is started if down but never recreated here — T711)
 #      (on failure: exit 2, stack keeps running at old version)
+#      (then: create the pg_stat_statements extension where its library is
+#      preloaded; a failure only warns)
 #  10. rolling restart, TWO-PHASE: upstreams → wait until SPAs report healthy
 #      → only then nginx (see the comment at rolling_restart for why). Inside
 #      phase 1 ocpp waits for backend: it is recreated only once the new
@@ -570,6 +572,44 @@ record_patch_baseline() {
   fi
 }
 
+# ─── Step 9c: Statement statistics ───────────────────────────────────
+#
+# compose preloads the pg_stat_statements library, but the extension is
+# created per database, and its view is what shows the slow statements. Create
+# it where the library is loaded, in schema public like the other extensions
+# (the server's search_path lists kernel first). Only a superuser can: the
+# migration role is not one and the extension is not on the trusted list, so
+# this cannot be a patch. Idempotent; every failure is a warning — the step
+# runs between the migration and the restart and must never stop the update.
+
+ensure_stat_statements() {
+  if [[ $DRY_RUN -eq 1 ]]; then log "[dry-run] ensure pg_stat_statements"; return 0; fi
+  [[ $FRONTEND_ONLY -eq 1 ]] && return 0
+  [[ -n "$(filter_present_services postgres)" ]] || return 0   # external database: not ours to change
+  local PGDB LOADED ERR
+  PGDB="$(env_get PGDATABASE)"
+  PGDB="${PGDB:-csms}"
+  LOADED="$(compose_cmd exec -T -e PGOPTIONS='-c statement_timeout=30s' postgres \
+              psql -X -U postgres -d "$PGDB" -tAc \
+              "SELECT count(*) FROM pg_settings WHERE name = 'shared_preload_libraries' AND setting ~ '(^|[, ])pg_stat_statements([, ]|\$)'" \
+              2>/dev/null | tr -dc '0-9' || true)"
+  if [[ -z "$LOADED" ]]; then
+    warn "pg_stat_statements: could not read the server settings of $PGDB — skipped"
+    return 0
+  fi
+  if [[ "$LOADED" != "1" ]]; then
+    log "pg_stat_statements: library not preloaded — extension left as it is"
+    return 0
+  fi
+  if ERR="$(compose_cmd exec -T -e PGOPTIONS='-c lock_timeout=5s -c statement_timeout=30s' postgres \
+              psql -X -U postgres -d "$PGDB" -tAc \
+              'CREATE EXTENSION IF NOT EXISTS pg_stat_statements SCHEMA public' 2>&1 >/dev/null)"; then
+    log "pg_stat_statements: extension present in $PGDB"
+  else
+    warn "pg_stat_statements: could not create the extension in $PGDB — skipped (${ERR%%$'\n'*})"
+  fi
+}
+
 # ─── Step 10: Hooks ──────────────────────────────────────────────────
 
 run_hook() {
@@ -802,6 +842,7 @@ run_hook pre-update.sh
 rebuild_local
 run_db_migrate
 record_patch_baseline
+ensure_stat_statements
 rolling_restart
 run_hook post-update.sh
 record_version

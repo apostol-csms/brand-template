@@ -601,6 +601,24 @@ wait_postgres_healthy() {
   done
 }
 
+# compose preloads the pg_stat_statements library; the extension is created per
+# database, in schema public like the other extensions, and only a superuser
+# can create it (the migration role is not one). Every failure is a warning,
+# never a reason to stop the install.
+ensure_stat_statements() {
+  [[ $DRY_RUN -eq 1 ]] && return 0
+  local PGDB ERR
+  PGDB="$(env_get PGDATABASE)"
+  PGDB="${PGDB:-csms}"
+  if ERR="$(compose_cmd exec -T -e PGOPTIONS='-c lock_timeout=5s -c statement_timeout=30s' postgres \
+              psql -X -U postgres -d "$PGDB" -tAc \
+              'CREATE EXTENSION IF NOT EXISTS pg_stat_statements SCHEMA public' 2>&1 >/dev/null)"; then
+    log "  pg_stat_statements: extension present in $PGDB"
+  else
+    warn "pg_stat_statements: could not create the extension in $PGDB — skipped (${ERR%%$'\n'*})"
+  fi
+}
+
 first_boot() {
   log "first boot sequence"
   run compose_cmd up -d postgres
@@ -610,6 +628,7 @@ first_boot() {
 
   log "  run db-init (creates users + schemas + seeds)"
   run compose_cmd up db-init
+  ensure_stat_statements
   # db-migrate has depends_on: db-init service_completed_successfully,
   # so it runs as part of `up -d` below.
 
