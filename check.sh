@@ -13,7 +13,7 @@
 #   [spa_env]     frontend/driver/pay/auth carry no secret-looking variable names (T174)
 #   [postgres]    pg_isready from inside the container
 #   [api]         GET https://cloud.${DOMAIN}/api/v1/ping → 200
-#   [openid]      GET https://auth.${DOMAIN}/.well-known/openid-configuration
+#   [auth]        GET https://auth.${DOMAIN}/login → 200 (sign-in page)
 #   [ocpp]        TCP connect :9220
 #   [frontend]    GET https://${DOMAIN}/ → 200 (landing)
 #   [tls]         cert expiry ≥ 7 days for a sample of subdomains
@@ -23,7 +23,7 @@
 #   [memory]      MemAvailable ≥ 1 GB
 #   [version]     workdir/.installed-version matches docker image tag
 #
-# --local mode: api/openid/frontend probes connect to 127.0.0.1:443 with
+# --local mode: api/auth/frontend probes connect to 127.0.0.1:443 with
 # `--resolve <host>:443:127.0.0.1` — Host header and SNI stay correct
 # while the TCP connection goes to loopback. The TLS check likewise
 # points openssl s_client at 127.0.0.1:443 while keeping -servername.
@@ -272,19 +272,19 @@ check_api_ping() {
   fi
 }
 
-check_openid() {
+check_auth() {
   local HOST="auth.${DOMAIN}"
-  local URL="https://${HOST}/.well-known/openid-configuration"
+  local URL="https://${HOST}/login"
   local CODE
   set_resolve "$HOST"
   CODE="$(curl -ks -o /dev/null -w '%{http_code}' --max-time 5 \
             "${RESOLVE_ARGS[@]}" "$URL" 2>/dev/null)"
   if [[ "$CODE" == "200" ]]; then
-    record openid ok
+    record auth ok
   elif [[ "$DOMAIN" == "localhost" ]]; then
-    record openid warn "$URL → $CODE"
+    record auth warn "$URL → $CODE"
   else
-    record openid fail "$URL → $CODE"
+    record auth fail "$URL → $CODE"
   fi
 }
 
@@ -496,7 +496,7 @@ if [[ -f "$WORKDIR/.env" ]]; then
   check_spa_env
   check_postgres
   check_api_ping
-  check_openid
+  check_auth
   check_ocpp_tcp
   check_frontend_landing
   check_tls

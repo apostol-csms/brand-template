@@ -456,7 +456,7 @@ Runs 10 checks:
 | `containers` | All compose services `running` + `healthy` |
 | `postgres` | `pg_isready` from inside the container |
 | `api` | `GET https://${DOMAIN}/api/v1/ping` → 200 |
-| `openid` | `GET https://auth.${DOMAIN}/.well-known/openid-configuration` → 200 |
+| `auth` | `GET https://auth.${DOMAIN}/login` → 200 (the sign-in page) |
 | `ocpp` | TCP `:9220` reachable |
 | `frontend` | `GET https://${DOMAIN}/` → 200/301/302 |
 | `tls` | Minimum expiry across sample subdomains ≥ 7 days |
