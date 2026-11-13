@@ -6,7 +6,7 @@
 #   auth.${DOMAIN}                       → auth container + backend API
 #   ocpp.${DOMAIN}                       → OCPP Central System
 
-# Rate limiting zones defined in nginx.conf (auth_token, auth_identifier)
+# Rate limiting zones defined in nginx.conf (signin_token, signin_identifier, charge_create, charge_status)
 
 # Upstreams are resolved lazily via resolver 127.0.0.11 + map $host $*_upstream
 # (see nginx.conf). No static upstream{} blocks — they pin the IP at start and
@@ -507,9 +507,13 @@ server {
 
     client_max_body_size 1m;
 
+    include /etc/nginx/includes/signin-limited.conf;
+
     location = /oauth2/token {
-        limit_req zone=auth_token burst=5 nodelay;
+        limit_req zone=signin_token burst=5 nodelay;
         limit_req_status 429;
+        recursive_error_pages on;
+        error_page 429 @signin_limited;
 
         proxy_pass $backend_upstream;
         proxy_http_version 1.1;
@@ -522,8 +526,10 @@ server {
     }
 
     location = /oauth2/identifier {
-        limit_req zone=auth_identifier burst=5 nodelay;
+        limit_req zone=signin_identifier burst=5 nodelay;
         limit_req_status 429;
+        recursive_error_pages on;
+        error_page 429 @signin_limited;
 
         proxy_pass $backend_upstream;
         proxy_http_version 1.1;
