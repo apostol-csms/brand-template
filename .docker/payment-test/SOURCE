@@ -1,0 +1,4 @@
+Source: https://github.com/apostoldevel/payment-test
+Commit: 2504432ab4bfebd4793cc1dfc66c7edc945c0d4d
+Contents: the runtime files of that commit, byte for byte (Dockerfile, .dockerignore, LICENSE, README.md, app/, openapi.json, requirements.in, requirements.txt). Tests and requirements-dev.txt are left out.
+To update: replace the files from a newer commit and change the hash here.

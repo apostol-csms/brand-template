@@ -20,6 +20,7 @@ message catch-all, run-time helpers, optional VPN.
 | `test-run/` | Test harness container | `local/<brand>-test-run` |
 | `wireguard/` | Optional admin VPN (compose profile `vpn`) | `local/<brand>-wireguard` |
 | `nginx-certbot/` | TLS-terminating reverse proxy + Let's Encrypt webroot renewal | `local/<brand>-nginx` |
+| `payment-test/` | Stand-in payment provider, a copy of a pinned commit of `apostoldevel/payment-test` (hash in `SOURCE`); compose profile `payment-test` | `<project>-payment-test` |
 
 ## Notes per directory
 

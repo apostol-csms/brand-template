@@ -28,7 +28,8 @@
 #      image. landing is the only brand-built frontend and lives in ../landing)
 #   6. render per-app env via envs/<env>/render.sh, when the brand has one
 #   7. hooks/pre-update.sh
-#   8. docker compose build — landing + local infra (nginx, pgbouncer);
+#   8. docker compose build — landing + local infra (nginx, pgbouncer),
+#      then payment-test when its profile is on (a failed build only warns);
 #      with --frontend-only, landing alone
 #   9. docker compose run --rm --no-deps db-migrate   ← blocking gate
 #      (postgres is started if down but never recreated here)
@@ -516,6 +517,40 @@ wait_backend_listening() {
   warn "  proceeding with ocpp; check the listener subscriptions (pgbouncer was recreated)"
 }
 
+# ─── payment-test (profile `payment-test`) ───────────────────────────
+#
+# A test-only service built on the host from .docker/payment-test. Kept apart
+# from the infra build and the rolling restart on purpose: it holds its state
+# in memory, so it is recreated only when its image or configuration changed
+# (a plain `up -d`, no --force-recreate), and a failed build — the Python
+# packages come from the package index — costs a warning, not the update.
+PAYMENT_TEST_BUILD_FAILED=0
+
+rebuild_payment_test() {
+  [[ $FRONTEND_ONLY -eq 1 ]] && return 0
+  [[ -n "$(filter_present_services payment-test)" ]] || return 0   # profile off
+  log "docker compose build: payment-test"
+  if ! run compose_cmd build payment-test; then
+    PAYMENT_TEST_BUILD_FAILED=1
+    warn "payment-test build failed — the running container (if any) is left as it is"
+  fi
+}
+
+refresh_payment_test() {
+  [[ $FRONTEND_ONLY -eq 1 ]] && return 0
+  [[ -n "$(filter_present_services payment-test)" ]] || return 0   # profile off
+  if [[ $PAYMENT_TEST_BUILD_FAILED -eq 1 ]]; then
+    warn "payment-test: not started (build failed)"
+    return 0
+  fi
+  if [[ -z "$(env_get PAYMENT_TEST_SERVICE_KEY)" ]]; then
+    warn "payment-test profile is on but PAYMENT_TEST_SERVICE_KEY is empty in workdir/.env — not started"
+    return 0
+  fi
+  log "payment-test: up -d (recreated only if its image or configuration changed)"
+  run compose_cmd up -d --no-deps payment-test || warn "payment-test did not start"
+}
+
 rolling_restart() {
   local UPSTREAM LATE=""
   if [[ $FRONTEND_ONLY -eq 1 ]]; then
@@ -551,6 +586,7 @@ rolling_restart() {
   wait_spas_healthy
   log "rolling restart (phase 2 — nginx)"
   run compose_cmd up -d --no-deps --force-recreate nginx
+  refresh_payment_test
   RECREATED="$UPSTREAM ${LATE:+$LATE }nginx"   # verify_update waits for these before check.sh looks at them
 }
 
@@ -845,6 +881,7 @@ update_sources
 render_app_env
 run_hook pre-update.sh
 rebuild_local
+rebuild_payment_test
 run_db_migrate
 record_patch_baseline
 ensure_stat_statements

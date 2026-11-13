@@ -672,6 +672,52 @@ services:
     depends_on:
       - backend
 
+  # ─── payment-test: a stand-in payment provider, profile `payment-test` ──────
+  #
+  # Answers the payment-service contract the way a real provider's service
+  # does, and moves no money. It is for test and demonstration instances:
+  # the profile is off by default and stays off on a live brand, so nothing
+  # here is built or started unless COMPOSE_PROFILES lists `payment-test`.
+  #
+  # Built on the host from .docker/payment-test (a copy of a pinned commit,
+  # see its SOURCE file), like nginx: no registry image, no pull. The base
+  # image comes from BASE_REGISTRY, the Python packages from the package
+  # index at build time.
+  #
+  # lan only, never published through nginx. The database calls it through
+  # PGFetch and it posts its notifications back to the backend over lan.
+  # SERVICE_KEY is required by the service itself (it refuses to start
+  # without it) and must equal the key the database side sends. The default
+  # is empty so the file still renders where the profile is off; with the
+  # profile on and the key empty the container exits at start.
+  payment-test:
+    build:
+      context: ./.docker/payment-test
+      args:
+        REGISTRY: ${BASE_REGISTRY:-docker.io/library}
+    profiles: ["payment-test"]
+    logging: *default-logging
+    container_name: payment-test
+    networks:
+      - lan-network
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      PORT: ${PAYMENT_TEST_PORT:-8000}
+      SERVICE_KEY: ${PAYMENT_TEST_SERVICE_KEY:-}
+      NOTIFY_URL: ${PAYMENT_TEST_NOTIFY_URL:-http://backend:4977}
+      NOTIFY_TIMEOUT_S: ${PAYMENT_TEST_NOTIFY_TIMEOUT_S:-5}
+      LOG_LEVEL: ${PAYMENT_TEST_LOG_LEVEL:-INFO}
+    healthcheck:
+      # The image is python:slim: no curl, so the probe is the interpreter.
+      test: ["CMD", "python", "-c", "import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/health' % os.environ['PORT'], timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      - backend
+
   # ─── Optional ───────────────────────────────────────────────
 
   stripe-cli:

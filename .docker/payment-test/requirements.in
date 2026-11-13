@@ -1,0 +1,14 @@
+# What this service depends on, and the lowest version of each that works.
+# This file states the intent; requirements.txt holds the resolved versions and
+# is what the image installs. Add a dependency here, never there.
+#
+# To re-resolve after editing this file (same base image the Dockerfile uses):
+#
+#   docker run --rm -v "$PWD:/w" -w /w python:3.11-slim \
+#     sh -c 'pip install --no-cache-dir -q -r requirements.in && pip freeze' \
+#     > requirements.txt
+#
+# then restore the header comment at the top of requirements.txt.
+fastapi>=0.115.0
+uvicorn[standard]>=0.34.0
+httpx>=0.28.0
