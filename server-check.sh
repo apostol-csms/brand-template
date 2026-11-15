@@ -112,12 +112,16 @@ while i < len(args):
         print("server-check.sh: unknown argument %s" % a, file=sys.stderr); sys.exit(2)
     i += 1
 opt["max_hours"] = float(opt["max_hours"])
+if opt["state_stdin"] and (opt["state_b64"] or opt["state_file"]):
+    print("server-check.sh: --state-stdin cannot be combined with --state-b64 or --state-file", file=sys.stderr); sys.exit(2)
+if opt["state_stdin"] and sys.stdin.isatty():
+    print("server-check.sh: --state-stdin needs the state piped on stdin (a terminal is attached)", file=sys.stderr); sys.exit(2)
 
 # ── helpers ─────────────────────────────────────────────────────────────────
 def run(cmd, timeout=60, stdin=None):
     try:
-        p = subprocess.run(cmd, input=stdin, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                           timeout=timeout, universal_newlines=True, errors="replace")
+        p = subprocess.run(cmd, input=stdin, **({} if stdin is not None else {"stdin": subprocess.DEVNULL}),
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout, universal_newlines=True, errors="replace")
         return p.returncode, p.stdout
     except Exception as e:
         return 127, str(e)
@@ -364,7 +368,7 @@ def t_check():
         return None
     cmd = ["./check.sh", "--json"] + (["--local"] if opt["check_local"] else [])
     try:
-        p = subprocess.run(cmd, cwd=workdir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        p = subprocess.run(cmd, cwd=workdir, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                            universal_newlines=True, errors="replace", timeout=120)
         return json.loads(p.stdout)
     except Exception as e:
@@ -373,7 +377,7 @@ def t_check():
 def t_logs(name):
     # a container older than the window start has all its lines in it
     cmd = ["docker", "logs", "--timestamps", "--since", since_arg, name]
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+    p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                          universal_newlines=True, errors="replace", bufsize=1 << 16)
     timer = threading.Timer(LOG_TIMEOUT_S, p.kill)
     timer.start()
@@ -511,13 +515,13 @@ def scan_access(path, rx, hostgroup):
     days = day_filters()
     grep = ["grep", "-a"] + sum([["-e", x] for x in days], [])
     if path.endswith(".gz"):
-        p1 = subprocess.Popen(["zcat", path], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        p1 = subprocess.Popen(["zcat", path], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         p2 = subprocess.Popen(grep, stdin=p1.stdout, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                               universal_newlines=True, errors="replace", bufsize=1 << 16)
         p1.stdout.close()
         stream = p2.stdout
     else:
-        p2 = subprocess.Popen(grep + [path], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        p2 = subprocess.Popen(grep + [path], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                               universal_newlines=True, errors="replace", bufsize=1 << 16)
         stream = p2.stdout
     for line in stream:
@@ -909,17 +913,31 @@ if grown_fp:
 # A `fail` is never accepted; an entry without a reason, without a card / owner_word,
 # or with a substring shorter than ACCEPT_MIN_MATCH characters accepts nothing.
 ACCEPT_MIN_MATCH = 8
-def _acceptable(a):
-    return (isinstance(a, dict) and a.get("area") and isinstance(a.get("match"), str)
-            and len(a["match"]) >= ACCEPT_MIN_MATCH and str(a.get("reason") or "").strip()
-            and (a.get("card") or a.get("owner_word")))
-accepted = [a for a in (state.get("accepted_flags") or []) if _acceptable(a)]
-rejected_accept = len(state.get("accepted_flags") or []) - len(accepted)
+def _text(v):
+    return isinstance(v, str) and bool(v.strip())
+def _why_not(a):
+    # the missing condition of a stored entry, or None when it is acceptable
+    if not isinstance(a, dict): return "not an object"
+    if not _text(a.get("area")): return "no area"
+    if not _text(a.get("match")) or len(a["match"].strip()) < ACCEPT_MIN_MATCH: return "match shorter than %d characters" % ACCEPT_MIN_MATCH
+    if not _text(a.get("reason")): return "no reason"
+    if not (_text(a.get("card")) or _text(a.get("owner_word"))): return "no card or owner_word"
+    return None
+stored = state.get("accepted_flags")
+stored = stored if isinstance(stored, list) else []
+accepted, ignored = [], []
+for idx, a in enumerate(stored):
+    why = _why_not(a)
+    if why: ignored.append("#%d %s%s: %s" % (idx, a.get("area", "") if isinstance(a, dict) else "", (" / " + str(a.get("match"))[:30]) if isinstance(a, dict) and a.get("match") else "", why))
+    else: accepted.append(a)
+if state.get("accepted_flags") is not None and not isinstance(state.get("accepted_flags"), list):
+    ignored.append("accepted_flags is not a list")
 live_flags, accepted_hits = [], []
 for f in flags:
     hit = None if f["sev"] == "fail" else next((a for a in accepted if a["area"] == f["area"] and a["match"] in f["msg"]), None)
     if hit:
-        accepted_hits.append({"area": f["area"], "msg": f["msg"], "reason": hit.get("reason"), "card": hit.get("card"), "owner_word": hit.get("owner_word")})
+        accepted_hits.append({k: v for k, v in {"area": f["area"], "msg": f["msg"], "reason": hit.get("reason"),
+                                                "card": hit.get("card"), "owner_word": hit.get("owner_word")}.items() if v})
     else:
         live_flags.append(f)
 log_counts = {n: c for n, c in sorted(fps.counts.items())}
@@ -930,7 +948,7 @@ rep = {
     "candidate": "clean" if not live_flags else ("fail" if any(f["sev"] == "fail" for f in live_flags) else "findings"),
     "flags": live_flags,
     "accepted_flags": accepted_hits,
-    "accepted_ignored": rejected_accept,
+    **({"accepted_ignored": ignored} if ignored else {}),
     "rollout": rollout,
     "check_sh": (check_out or {}).get("overall"),
     "resources": resources,
