@@ -318,6 +318,7 @@ perfectly healthy. Run it with `--local`, or set `CHECK_LOCAL=1` in
 ├── install.sh                        First-time deployment
 ├── update.sh                         Version bump + rolling restart
 ├── check.sh                          Health verification
+├── server-check.sh                   Read-only post-rollout pass: one run, short JSON
 ├── docker-*.sh                       up / down / logs / build helpers
 │
 ├── .docker/                          Locally-built infra images
@@ -467,6 +468,15 @@ Runs 10 checks:
 | `version` | Running backend image tag matches `workdir/.installed-version` |
 
 Exit codes: **0** = all green, **1** = ≥1 warn, **2** = ≥1 fail. `--json` emits a one-line JSON payload for Datadog/Prometheus.
+
+### server-check.sh — read-only pass after a rollout
+
+`./server-check.sh` (or `ssh <host> 'bash -s' < server-check.sh`) reads the host once and prints one JSON object: the
+inventory, `check.sh --json`, resources, container and nginx log lines counted by their level field and normalised into
+fingerprints (new or grown ones listed with a masked sample), nginx 5xx and latency per host, PostgreSQL activity and
+counter deltas, and two `/metrics` scrapes. It writes nothing on the host and never prints a setting value. `--state-b64`
+or `--state-file` take the previous run's `state` so that only what is new or grew comes back; see the header of the
+script for the options.
 
 When `DOMAIN=localhost`, HTTPS / TLS checks degrade to `warn` instead of `fail`.
 
