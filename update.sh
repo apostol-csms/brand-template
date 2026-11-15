@@ -549,11 +549,15 @@ refresh_payment_test() {
   fi
   # The backend dials the service through PGFetch; the outbound filter refuses
   # an internal address that fetch.allow does not name (FETCH_ALLOW_EXTRA).
+  # Only the exact host:port entry is recognised here; the entrypoint splits
+  # the list on commas and spaces, so the check does the same.
   if [[ "$(env_get FETCH_DENY_INTERNAL)" != "false" ]]; then
-    local pt_entry="payment-test:$(env_get PAYMENT_TEST_PORT)"
-    [[ "$pt_entry" == "payment-test:" ]] && pt_entry="payment-test:8000"
-    if ! [[ ",$(env_get FETCH_ALLOW_EXTRA)," =~ [,[:space:]]${pt_entry}[,[:space:]] ]]; then
-      warn "payment-test profile is on but FETCH_ALLOW_EXTRA in workdir/.env lacks $pt_entry — backend calls to it are refused by fetch.deny_internal"
+    local pt_port pt_entry pt_list
+    pt_port="$(env_get PAYMENT_TEST_PORT)"
+    pt_entry="payment-test:${pt_port:-8000}"
+    pt_list="$(env_get FETCH_ALLOW_EXTRA | tr ',' ' ' | tr -d "'\"")"
+    if [[ " $pt_list " != *" $pt_entry "* ]]; then
+      warn "payment-test profile is on but FETCH_ALLOW_EXTRA in workdir/.env lacks $pt_entry — backend calls to it are refused by fetch.deny_internal (add it, then recreate backend: the list is built at its start)"
     fi
   fi
   log "payment-test: up -d (recreated only if its image or configuration changed)"
