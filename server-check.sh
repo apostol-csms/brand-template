@@ -13,7 +13,10 @@
 #   ssh <host> 'bash -s -- [options]' < server-check.sh
 #
 # Options:
-#   --state-b64 STR   previous state.json, gzip + base64 (one line)
+#   --state-stdin     previous state.json, gzip + base64, read from stdin after the script
+#                     text (`{ cat server-check.sh; printf '%s' "$B64"; } | ssh <host> 'bash -s -- --state-stdin'`):
+#                     not in the process list, no argument-size limit
+#   --state-b64 STR   the same as an argument (visible in `ps`; the Linux limit is 128 KiB)
 #   --state-file F    previous state.json as a file on the host
 #   --workdir DIR     the brand workdir holding check.sh (default: the script's own
 #                     directory when it sits next to check.sh, else the only /opt/*/csms)
@@ -88,17 +91,18 @@ def usage(rc):
     sys.exit(rc)
 
 args = sys.argv[1:]
-opt = {"state_b64": None, "state_file": None, "workdir": None, "since": None,
+opt = {"state_b64": None, "state_stdin": False, "state_file": None, "workdir": None, "since": None,
        "max_hours": 48.0, "db": None, "check_local": False, "no_check": False}
 i = 0
 while i < len(args):
     a = args[i]
     if a in ("-h", "--help"):
-        print("server-check.sh [--state-b64 STR | --state-file F] [--workdir DIR] [--since ISO] "
+        print("server-check.sh [--state-stdin | --state-b64 STR | --state-file F] [--workdir DIR] [--since ISO] "
               "[--max-hours N] [--db NAME] [--check-local] [--no-check]")
         sys.exit(0)
     elif a == "--check-local": opt["check_local"] = True
     elif a == "--no-check": opt["no_check"] = True
+    elif a == "--state-stdin": opt["state_stdin"] = True
     elif a in ("--state-b64", "--state-file", "--workdir", "--since", "--max-hours", "--db"):
         i += 1
         if i >= len(args):
@@ -246,7 +250,9 @@ fps = Fps()
 # ── state ───────────────────────────────────────────────────────────────────
 state = {}
 try:
-    if opt["state_b64"]:
+    if opt["state_stdin"]:
+        state = json.loads(gzip.decompress(base64.b64decode(sys.stdin.read().strip())).decode("utf-8"))
+    elif opt["state_b64"]:
         state = json.loads(gzip.decompress(base64.b64decode(opt["state_b64"])).decode("utf-8"))
     elif opt["state_file"]:
         with open(opt["state_file"]) as f:
@@ -899,13 +905,21 @@ if grown_fp:
 
 # ── output ──────────────────────────────────────────────────────────────────
 # flags the owner accepted (state.accepted_flags: area + substring of the message,
-# reason, card) are counted, not reported as findings
-accepted = [a for a in (state.get("accepted_flags") or []) if isinstance(a, dict) and a.get("area") and a.get("match")]
+# reason, and a card or the owner's recorded word) are counted, not reported as findings.
+# A `fail` is never accepted; an entry without a reason, without a card / owner_word,
+# or with a substring shorter than ACCEPT_MIN_MATCH characters accepts nothing.
+ACCEPT_MIN_MATCH = 8
+def _acceptable(a):
+    return (isinstance(a, dict) and a.get("area") and isinstance(a.get("match"), str)
+            and len(a["match"]) >= ACCEPT_MIN_MATCH and str(a.get("reason") or "").strip()
+            and (a.get("card") or a.get("owner_word")))
+accepted = [a for a in (state.get("accepted_flags") or []) if _acceptable(a)]
+rejected_accept = len(state.get("accepted_flags") or []) - len(accepted)
 live_flags, accepted_hits = [], []
 for f in flags:
-    hit = next((a for a in accepted if a["area"] == f["area"] and a["match"] in f["msg"]), None)
+    hit = None if f["sev"] == "fail" else next((a for a in accepted if a["area"] == f["area"] and a["match"] in f["msg"]), None)
     if hit:
-        accepted_hits.append({"area": f["area"], "msg": f["msg"], "reason": hit.get("reason"), "card": hit.get("card")})
+        accepted_hits.append({"area": f["area"], "msg": f["msg"], "reason": hit.get("reason"), "card": hit.get("card"), "owner_word": hit.get("owner_word")})
     else:
         live_flags.append(f)
 log_counts = {n: c for n, c in sorted(fps.counts.items())}
@@ -916,6 +930,7 @@ rep = {
     "candidate": "clean" if not live_flags else ("fail" if any(f["sev"] == "fail" for f in live_flags) else "findings"),
     "flags": live_flags,
     "accepted_flags": accepted_hits,
+    "accepted_ignored": rejected_accept,
     "rollout": rollout,
     "check_sh": (check_out or {}).get("overall"),
     "resources": resources,
