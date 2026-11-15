@@ -547,6 +547,15 @@ refresh_payment_test() {
     warn "payment-test profile is on but PAYMENT_TEST_SERVICE_KEY is empty in workdir/.env — not started"
     return 0
   fi
+  # The backend dials the service through PGFetch; the outbound filter refuses
+  # an internal address that fetch.allow does not name (FETCH_ALLOW_EXTRA).
+  if [[ "$(env_get FETCH_DENY_INTERNAL)" != "false" ]]; then
+    local pt_entry="payment-test:$(env_get PAYMENT_TEST_PORT)"
+    [[ "$pt_entry" == "payment-test:" ]] && pt_entry="payment-test:8000"
+    if ! [[ ",$(env_get FETCH_ALLOW_EXTRA)," =~ [,[:space:]]${pt_entry}[,[:space:]] ]]; then
+      warn "payment-test profile is on but FETCH_ALLOW_EXTRA in workdir/.env lacks $pt_entry — backend calls to it are refused by fetch.deny_internal"
+    fi
+  fi
   log "payment-test: up -d (recreated only if its image or configuration changed)"
   run compose_cmd up -d --no-deps payment-test || warn "payment-test did not start"
 }
