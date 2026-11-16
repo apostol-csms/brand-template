@@ -1,0 +1,9 @@
+# Request counts and latency per virtual host from the `main_host` access log format
+# (`... "<request>" <status> <bytes> "<referer>" "<agent>" host=<host> rt=<seconds>`).
+counter nginx_http_requests_total by vhost, code
+histogram nginx_http_request_duration_seconds by vhost buckets 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30
+
+/^\S+ - \S+ \[[^\]]+\] "[^"]*" (?P<code>\d{3}) \d+ "[^"]*" "[^"]*" host=(?P<host>\S+) rt=(?P<rt>[0-9.]+)$/ {
+  nginx_http_requests_total[$host][$code]++
+  nginx_http_request_duration_seconds[$host] = $rt
+}

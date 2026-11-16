@@ -370,8 +370,12 @@ services:
     logging: *default-logging
     container_name: backend
     networks:
-      - lan-network
-      - db-network
+      lan-network:
+      db-network:
+      # The site agent scrapes /metrics here; the alias keeps the answer on this network, so the
+      # agent's source address is its fixed one (METRICS_ALLOW).
+      metrics-network:
+        aliases: [backend-metrics]
     restart: unless-stopped
     stop_grace_period: 50s
     env_file:
@@ -448,8 +452,10 @@ services:
     logging: *default-logging
     container_name: ocpp
     networks:
-      - lan-network
-      - db-network
+      lan-network:
+      db-network:
+      metrics-network:
+        aliases: [ocpp-metrics]
     ports:
       # loopback by default: the edge nginx reaches ocpp over the docker network. A node of a multi-node
       # setup that the edge reaches over the network sets OCPP_BIND to its private address.
@@ -783,10 +789,109 @@ services:
       pgbouncer:
         condition: service_healthy
 
+  # ---- Site metrics agents (profile `monitoring`, off by default) -------------------------------
+  # vmagent scrapes backend, ocpp, the host, PostgreSQL and the nginx access log inside the compose
+  # network and itself sends the series to the central node (remote_write over TLS with a key).
+  # No port is published. While the node is unreachable the agent keeps series on its disk volume
+  # and sends them later. Needs METRICS_SITE, METRICS_REMOTE_WRITE_URL, METRICS_REMOTE_WRITE_USER,
+  # the password file (METRICS_WRITE_PASSWORD_FILE) and METRICS_ALLOW=${METRICS_AGENT_IP}.
+  vmagent:
+    image: ${MON_REGISTRY:-docker.io}/victoriametrics/vmagent:v1.155.0
+    profiles: ["monitoring"]
+    logging: *default-logging
+    container_name: vmagent
+    restart: unless-stopped
+    mem_limit: 64m
+    environment:
+      GOMEMLIMIT: 52MiB
+    networks:
+      lan-network:
+      metrics-network:
+        ipv4_address: ${METRICS_AGENT_IP:-10.89.250.2}
+    command:
+      - -promscrape.config=/etc/vmagent/scrape.yml
+      - -promscrape.config.strictParse=true
+      - -remoteWrite.url=${METRICS_REMOTE_WRITE_URL:-}
+      - -remoteWrite.basicAuth.username=${METRICS_REMOTE_WRITE_USER:-}
+      - -remoteWrite.basicAuth.passwordFile=/run/secrets/metrics_write_password
+      - -remoteWrite.label=site=${METRICS_SITE:-}
+      - -remoteWrite.tmpDataPath=/vmagent-data
+      - -remoteWrite.maxDiskUsagePerURL=${METRICS_QUEUE_MAX:-512MB}
+      - -httpListenAddr=:8429
+    volumes:
+      - ./.docker/monitoring/vmagent:/etc/vmagent:ro
+      - ${METRICS_WRITE_PASSWORD_FILE:-./workdir/.metrics-write-password}:/run/secrets/metrics_write_password:ro
+      - vmagent-data:/vmagent-data
+
+  node-exporter:
+    image: ${MON_REGISTRY:-docker.io}/prom/node-exporter:v1.9.1
+    profiles: ["monitoring"]
+    logging: *default-logging
+    container_name: node-exporter
+    restart: unless-stopped
+    mem_limit: 32m
+    networks:
+      - lan-network
+    pid: host
+    command:
+      - --path.rootfs=/host
+      - --collector.disable-defaults
+      - --collector.cpu
+      - --collector.meminfo
+      - --collector.loadavg
+      - --collector.filesystem
+      - --collector.diskstats
+      - --collector.netdev
+      - --collector.stat
+      - --collector.time
+      - --collector.uname
+      - --collector.pressure
+    volumes:
+      - /:/host:ro,rslave
+
+  postgres-exporter:
+    image: ${POSTGRES_EXPORTER_IMAGE:-quay.io/prometheuscommunity/postgres-exporter:v0.17.1}
+    profiles: ["monitoring"]
+    logging: *default-logging
+    container_name: postgres-exporter
+    restart: unless-stopped
+    mem_limit: 48m
+    networks:
+      - lan-network
+      - db-network
+    environment:
+      DATA_SOURCE_URI: postgres:5432/${PGDATABASE:-postgres}?sslmode=disable
+      DATA_SOURCE_USER: ${MONITOR_DB_USER:-monitor}
+      DATA_SOURCE_PASS_FILE: /run/secrets/monitor_db_password
+    volumes:
+      - ${MONITOR_DB_PASSWORD_FILE:-./workdir/.monitor-db-password}:/run/secrets/monitor_db_password:ro
+
+  mtail:
+    build:
+      context: ./.docker/monitoring/mtail
+      args:
+        BASE_REGISTRY: ${BASE_REGISTRY:-docker.io/library}
+    image: csms-mtail:local
+    profiles: ["monitoring"]
+    logging: *default-logging
+    container_name: mtail
+    restart: unless-stopped
+    mem_limit: 48m
+    networks:
+      - lan-network
+    volumes:
+      - logs-nginx:/var/log/nginx:ro
+
 networks:
   wan-network:
   lan-network:
   db-network:
+  # Only for the site metrics agent and the services it scrapes. A fixed address for the agent is
+  # what METRICS_ALLOW lists (an address, never a subnet); lan-network has no fixed addressing.
+  metrics-network:
+    ipam:
+      config:
+        - subnet: ${METRICS_SUBNET:-10.89.250.0/29}
 
 volumes:
   letsencrypt:
@@ -816,6 +921,7 @@ volumes:
   logs-ocpp:
   logs-ocpp-pg:
   postgresql:
+  vmagent-data:
   files:
   csms-secrets:   # Persistent role passwords + oauth client secrets.
                   # Populated by entrypoint-secrets.sh on first install

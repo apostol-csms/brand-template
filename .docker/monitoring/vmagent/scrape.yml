@@ -1,0 +1,47 @@
+# Scrape targets of the site agent. Each job name is part of the alert contract: `csms-node`,
+# `csms-postgres`, `csms-nginx`, `csms-app` (backend and ocpp, told apart by `instance`).
+# The application targets are reached through the aliases on metrics-network, so the source
+# address they see is the agent's fixed one (the one METRICS_ALLOW lists).
+global:
+  scrape_interval: 30s
+  scrape_timeout: 10s
+
+scrape_configs:
+  - job_name: csms-app
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["backend-metrics:4977"]
+        labels: {instance: backend}
+      - targets: ["ocpp-metrics:9220"]
+        labels: {instance: ocpp}
+
+  - job_name: csms-node
+    static_configs:
+      - targets: ["node-exporter:9100"]
+        labels: {instance: host}
+
+  - job_name: csms-postgres
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
+        labels: {instance: postgres}
+
+  - job_name: csms-nginx
+    static_configs:
+      - targets: ["mtail:3903"]
+        labels: {instance: nginx}
+    metric_relabel_configs:
+      # `host=` in the log is what the client sent. Anything that is not a domain name with a
+      # letter-only zone (an IP literal, a bare word) collapses into one value, so a scanner
+      # cannot mint series.
+      - source_labels: [vhost]
+        regex: "(.+\\.[a-z][a-z-]*)"
+        replacement: "$1"
+        target_label: vhost_checked
+      - source_labels: [vhost_checked]
+        regex: ""
+        replacement: other
+        target_label: vhost
+      - action: labeldrop
+        regex: vhost_checked
+      - action: labeldrop
+        regex: prog
