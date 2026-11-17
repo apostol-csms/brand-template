@@ -23,4 +23,4 @@ COPY nginx.mtail /etc/mtail/nginx.mtail
 USER 65534:65534
 EXPOSE 3903
 ENTRYPOINT ["/usr/local/bin/mtail"]
-CMD ["--progs", "/etc/mtail", "--logs", "/var/log/nginx/access.log", "--port", "3903"]
+CMD ["--progs", "/etc/mtail", "--logs", "/var/log/nginx/main_access.text.log", "--port", "3903"]

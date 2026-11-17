@@ -168,6 +168,11 @@ while true; do
   if [ "$rc" -ne 0 ]; then
     echo "certbot-renew: FAILED rc=$rc — at least one certificate line did not renew; nginx keeps serving the current certificates. Lines and days left: docker exec nginx renew-status; details (incl. \"Another instance of Certbot\" when a manual certbot ran at the same time): /var/log/letsencrypt/letsencrypt.log" >&2
   fi
+  # The plain-text access log read by the metrics agent: keep one older generation, then reopen.
+  if [ -s /var/log/nginx/main_access.text.log ]; then
+    mv -f /var/log/nginx/main_access.text.log /var/log/nginx/main_access.text.log.1
+    nginx -s reopen || echo "log-rotate: nginx -s reopen failed" >&2
+  fi
   sleep 12h &
   BG_PID=$!
   edge_wait "$BG_PID"
