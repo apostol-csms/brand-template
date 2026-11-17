@@ -863,6 +863,11 @@ services:
       DATA_SOURCE_URI: postgres:5432/${PGDATABASE:-postgres}?sslmode=disable
       DATA_SOURCE_USER: ${MONITOR_DB_USER:-monitor}
       DATA_SOURCE_PASS_FILE: /run/secrets/monitor_db_password
+    # POSTGRES_EXPORTER_STAT_STATEMENTS: set to empty to collect pg_stat_statements (the extension must exist in
+    # the database; one series per query), `no-` to leave it off.
+    command:
+      - --collector.long_running_transactions
+      - --${POSTGRES_EXPORTER_STAT_STATEMENTS-no-}collector.stat_statements
     volumes:
       - ${MONITOR_DB_PASSWORD_FILE:-./workdir/.monitor-db-password}:/run/secrets/monitor_db_password:ro
 
