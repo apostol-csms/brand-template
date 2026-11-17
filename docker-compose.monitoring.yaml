@@ -1,0 +1,120 @@
+# Site metrics agents as an overlay, for a deployment whose own compose file does not carry the
+# `monitoring` profile of docker-compose.yaml:
+#   docker compose -f docker-compose.yaml -f docker-compose.monitoring.yaml --env-file workdir/.env up -d
+# The agents scrape backend, ocpp, the host, PostgreSQL and the nginx access log inside the compose
+# network and send the series to the central node (remote_write over TLS with a key). No port is
+# published. The file adds the agents, the metrics-network network, and puts backend and ocpp on that
+# network; METRICS_ALLOW (workdir/.env) is the agent's fixed address, METRICS_AGENT_IP.
+# Needs ./.docker/monitoring/ next to it, METRICS_SITE, METRICS_REMOTE_WRITE_URL,
+# METRICS_REMOTE_WRITE_USER and the password files (see .env.template).
+
+x-monitoring-logging: &monitoring-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
+services:
+  backend:
+    networks:
+      metrics-network:
+        aliases: [backend-metrics]
+
+  ocpp:
+    networks:
+      metrics-network:
+        aliases: [ocpp-metrics]
+
+  vmagent:
+    image: ${MON_REGISTRY:-docker.io}/victoriametrics/vmagent:v1.155.0
+    logging: *monitoring-logging
+    container_name: vmagent
+    restart: unless-stopped
+    mem_limit: 64m
+    environment:
+      GOMEMLIMIT: 52MiB
+    networks:
+      lan-network:
+      metrics-network:
+        ipv4_address: ${METRICS_AGENT_IP:-10.89.250.2}
+    command:
+      - -promscrape.config=/etc/vmagent/scrape.yml
+      - -promscrape.config.strictParse=true
+      - -remoteWrite.url=${METRICS_REMOTE_WRITE_URL:-}
+      - -remoteWrite.basicAuth.username=${METRICS_REMOTE_WRITE_USER:-}
+      - -remoteWrite.basicAuth.passwordFile=/run/secrets/metrics_write_password
+      - -remoteWrite.label=site=${METRICS_SITE:-}
+      - -remoteWrite.tmpDataPath=/vmagent-data
+      - -remoteWrite.maxDiskUsagePerURL=${METRICS_QUEUE_MAX:-512MB}
+      - -httpListenAddr=:8429
+    volumes:
+      - ./.docker/monitoring/vmagent:/etc/vmagent:ro
+      - ${METRICS_WRITE_PASSWORD_FILE:-./workdir/.metrics-write-password}:/run/secrets/metrics_write_password:ro
+      - vmagent-data:/vmagent-data
+
+  node-exporter:
+    image: ${MON_REGISTRY:-docker.io}/prom/node-exporter:v1.9.1
+    logging: *monitoring-logging
+    container_name: node-exporter
+    restart: unless-stopped
+    mem_limit: 32m
+    networks:
+      - lan-network
+    pid: host
+    command:
+      - --path.rootfs=/host
+      - --collector.disable-defaults
+      - --collector.cpu
+      - --collector.meminfo
+      - --collector.loadavg
+      - --collector.filesystem
+      - --collector.diskstats
+      - --collector.netdev
+      - --collector.stat
+      - --collector.time
+      - --collector.uname
+      - --collector.pressure
+    volumes:
+      - /:/host:ro,rslave
+
+  # Started only once the database role exists and its password file is in place:
+  #   docker compose ... up -d postgres-exporter
+  postgres-exporter:
+    image: ${POSTGRES_EXPORTER_IMAGE:-quay.io/prometheuscommunity/postgres-exporter:v0.17.1}
+    logging: *monitoring-logging
+    container_name: postgres-exporter
+    restart: unless-stopped
+    mem_limit: 48m
+    networks:
+      - lan-network
+      - db-network
+    environment:
+      DATA_SOURCE_URI: postgres:5432/${PGDATABASE:-postgres}?sslmode=disable
+      DATA_SOURCE_USER: ${MONITOR_DB_USER:-monitor}
+      DATA_SOURCE_PASS_FILE: /run/secrets/monitor_db_password
+    volumes:
+      - ${MONITOR_DB_PASSWORD_FILE:-./workdir/.monitor-db-password}:/run/secrets/monitor_db_password:ro
+
+  mtail:
+    build:
+      context: ./.docker/monitoring/mtail
+      args:
+        BASE_REGISTRY: ${BASE_REGISTRY:-docker.io/library}
+    image: csms-mtail:local
+    logging: *monitoring-logging
+    container_name: mtail
+    restart: unless-stopped
+    mem_limit: 48m
+    networks:
+      - lan-network
+    volumes:
+      - logs-nginx:/var/log/nginx:ro
+
+networks:
+  metrics-network:
+    ipam:
+      config:
+        - subnet: ${METRICS_SUBNET:-10.89.250.0/29}
+
+volumes:
+  vmagent-data:
