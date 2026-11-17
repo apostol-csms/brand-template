@@ -20,7 +20,7 @@
 #   3. reload secrets (they may have rotated), re-pin PLATFORM_VERSION into
 #      workdir/.env, refuse to continue if any CHANGE_ME survives
 #   4. docker compose pull --ignore-buildable — EVERY platform image named in
-#      compose (db, backend, ocpp, webapp, driver, pay, auth, ai-service), not
+#      compose (db, backend, ocpp, webapp, driver, pay, auth, ai-service, report-service), not
 #      a fixed pair. A tag published for only some of them fails the whole run
 #      right here — which is what makes --platform=<pre-release> unusable
 #      unless every image carries that tag.
@@ -42,7 +42,8 @@
 #      backend is subscribed to LISTEN.
 #      platform-service (the Go /api/v2 service, profile `gateway`) rides
 #      phase 1a last, after backend + pgbouncer — filter_present_services
-#      drops it automatically where the profile is off
+#      drops it automatically where the profile is off; report-service (the
+#      PDF renderer behind backend) follows it in the same phase
 #  11. hooks/post-update.sh
 #  12. record version (and prev, for --rollback)
 #      — then report postgres config this run left unapplied (a new image,
@@ -569,7 +570,7 @@ rolling_restart() {
   if [[ $FRONTEND_ONLY -eq 1 ]]; then
     UPSTREAM="$SPA_SERVICES"
   else
-    UPSTREAM="backend ai-service $SPA_SERVICES pgbouncer platform-service"
+    UPSTREAM="backend ai-service $SPA_SERVICES pgbouncer platform-service report-service"
     LATE="ocpp"
   fi
   # Drop services not declared in the brand's docker-compose.yaml.
@@ -851,7 +852,7 @@ prune_images() {
     if [[ $DRY_RUN -eq 1 && "$INSTALLED_VERSION" != "$PLATFORM_VERSION" ]]; then
       PREV_VER="$INSTALLED_VERSION"
     fi
-    PLATFORM_RE='/csms-(backend|ocpp|db|webapp|driver|pay|auth|ai-service|platform-service):[0-9]+\.[0-9]+\.[0-9]+'
+    PLATFORM_RE='/csms-(backend|ocpp|db|webapp|driver|pay|auth|ai-service|platform-service|report-service):[0-9]+\.[0-9]+\.[0-9]+'
     # only the repositories THIS stack pulls — another stack on the same host
     # (for example a second brand on a shared host) keeps its images
     REPOS="$(compose_cmd config --images 2>/dev/null | sed 's/@.*//; s/:[^:/]*$//' | sort -u)"
