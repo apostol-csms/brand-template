@@ -923,11 +923,11 @@ networks:
   wan-network:
   lan-network:
   db-network:
-  # Only for the site metrics agent and the services it scrapes. A fixed address for the agent is
-  # what METRICS_ALLOW lists (an address, never a subnet); lan-network has no fixed addressing.
   # backend and report-service only; `internal` gives it no route out of the host.
   report-network:
     internal: true
+  # Only for the site metrics agent and the services it scrapes. A fixed address for the agent is
+  # what METRICS_ALLOW lists (an address, never a subnet); lan-network has no fixed addressing.
   metrics-network:
     ipam:
       config:
