@@ -411,7 +411,8 @@ def scrape(container, port):
     rc, out = run(["docker", "exec", container, "curl", "-fsS", "--max-time", "8",
                    "http://127.0.0.1:%d/metrics" % port], timeout=20)
     if rc != 0:
-        return None
+        # METRICS_ALLOW (site agent) closes loopback: the answer is 403, the agent still reads it
+        return "denied" if "403" in out else None
     d = {}
     for line in out.splitlines():
         if not line or line[0] == "#":
@@ -423,6 +424,21 @@ def scrape(container, port):
             except ValueError:
                 pass
     return d
+
+def vmagent_target_health(job, instance):
+    rc, out = run(["docker", "inspect", "vmagent", "--format",
+                   "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}"], timeout=10)
+    ips = out.split() if rc == 0 else []
+    if not ips:
+        return "no vmagent"
+    rc, out = run(["curl", "-fsS", "--max-time", "5", "http://%s:8429/targets" % ips[0]], timeout=10)
+    if rc != 0:
+        return "unreachable"
+    for line in out.splitlines():
+        if ('instance="%s"' % instance) in line and ('job="%s"' % job) in line:
+            m = re.search(r"state=(\w+)", line)
+            return m.group(1) if m else "unknown"
+    return "absent"
 
 metrics1 = {}
 for cn, port in (("backend", 4977), ("ocpp", 9220)):
@@ -806,6 +822,14 @@ for cn, port in (("backend", 4977), ("ocpp", 9220)):
     t1, m1 = metrics1[cn]
     m2 = scrape(cn, port)
     t2 = time.time()
+    if m1 == "denied" or m2 == "denied":
+        # the site agent (vmagent) is the only reader; its targets page says whether it gets the series
+        health = vmagent_target_health("csms-app", cn)
+        if health != "up":
+            flag("warn", "metrics", "%s /metrics closed to loopback (METRICS_ALLOW) and the site agent target is %s" % (cn, health))
+        else:
+            metrics_facts[cn] = "read by the site agent only (METRICS_ALLOW); target up"
+        continue
     if m1 is None or m2 is None:
         flag("warn", "metrics", "%s /metrics unreachable" % cn)
         continue
