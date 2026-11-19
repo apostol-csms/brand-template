@@ -34,7 +34,6 @@ services:
     environment:
       GOMEMLIMIT: 52MiB
     networks:
-      lan-network:
       metrics-network:
         ipv4_address: ${METRICS_AGENT_IP:-10.89.250.2}
     command:
@@ -59,7 +58,7 @@ services:
     restart: unless-stopped
     mem_limit: 32m
     networks:
-      - lan-network
+      - metrics-network
     pid: host
     command:
       - --path.rootfs=/host
@@ -86,10 +85,10 @@ services:
     restart: unless-stopped
     mem_limit: 48m
     networks:
-      - lan-network
+      - metrics-network
       - db-network
     environment:
-      DATA_SOURCE_URI: postgres:5432/${PGDATABASE:-postgres}?sslmode=disable
+      DATA_SOURCE_URI: postgres:5432/${PGDATABASE:-csms}?sslmode=disable
       DATA_SOURCE_USER: ${MONITOR_DB_USER:-monitor}
       DATA_SOURCE_PASS_FILE: /run/secrets/monitor_db_password
     # POSTGRES_EXPORTER_STAT_STATEMENTS: set to empty to collect pg_stat_statements (the extension must exist in
@@ -111,7 +110,7 @@ services:
     restart: unless-stopped
     mem_limit: 48m
     networks:
-      - lan-network
+      - metrics-network
     volumes:
       - logs-nginx:/var/log/nginx:ro
 
@@ -119,7 +118,7 @@ networks:
   metrics-network:
     ipam:
       config:
-        - subnet: ${METRICS_SUBNET:-10.89.250.0/29}
+        - subnet: ${METRICS_SUBNET:-10.89.250.0/28}
 
 volumes:
   vmagent-data:

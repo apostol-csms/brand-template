@@ -493,7 +493,7 @@ if vol:
 if not logdir:
     flag("warn", "nginx", "the nginx log volume was not found or is ambiguous (%d candidates): access logs not measured" % len(vols))
 
-RX_MAIN = re.compile(r'^\S+ \S+ \S+ \[(\d\d/\w{3}/\d{4}:\d\d:\d\d:\d\d) ([+-]\d{4})\] "([^"]*)" (\d{3}) .* host=(\S+) rt=([\d.]+)\s*$')
+RX_MAIN = re.compile(r'^\S+ \S+ \S+ \[(\d\d/\w{3}/\d{4}:\d\d:\d\d:\d\d) ([+-]\d{4})\] "([^"]*)" (\d{3}) .* host=(\S+) rt=([\d.]+)(?: vh=\S*)?\s*$')
 RX_OCPP = re.compile(r'^\S+ \S+ \S+ \[(\d\d/\w{3}/\d{4}:\d\d:\d\d:\d\d) ([+-]\d{4})\] "([^"]*)" (\d{3}) .* rt=([\d.]+)\s*$')
 MON = {m: i + 1 for i, m in enumerate("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split())}
 

@@ -30,18 +30,5 @@ scrape_configs:
       - targets: ["mtail:3903"]
         labels: {instance: nginx}
     metric_relabel_configs:
-      # `host=` in the log is what the client sent. Anything that is not a domain name with a
-      # letter-only zone (an IP literal, a bare word) collapses into one value, so a scanner
-      # cannot mint series.
-      - source_labels: [vhost]
-        regex: "(.+\\.[a-z][a-z-]*)"
-        replacement: "$1"
-        target_label: vhost_checked
-      - source_labels: [vhost_checked]
-        regex: ""
-        replacement: other
-        target_label: vhost
-      - action: labeldrop
-        regex: vhost_checked
       - action: labeldrop
         regex: prog

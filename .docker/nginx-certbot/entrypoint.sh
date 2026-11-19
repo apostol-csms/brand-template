@@ -170,8 +170,11 @@ while true; do
   fi
   # The plain-text access log read by the metrics agent: keep one older generation, then reopen.
   if [ -s /var/log/nginx/main_access.text.log ]; then
-    mv -f /var/log/nginx/main_access.text.log /var/log/nginx/main_access.text.log.1
-    nginx -s reopen || echo "log-rotate: nginx -s reopen failed" >&2
+    if mv -f /var/log/nginx/main_access.text.log /var/log/nginx/main_access.text.log.1; then
+      nginx -s reopen || echo "log-rotate: nginx -s reopen failed" >&2
+    else
+      echo "log-rotate: mv of main_access.text.log failed (rc=$?)" >&2
+    fi
   fi
   sleep 12h &
   BG_PID=$!
