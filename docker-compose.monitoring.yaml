@@ -30,9 +30,9 @@ services:
     logging: *monitoring-logging
     container_name: vmagent
     restart: unless-stopped
-    mem_limit: 64m
+    mem_limit: 128m
     environment:
-      GOMEMLIMIT: 52MiB
+      GOMEMLIMIT: 100MiB
     networks:
       metrics-network:
         ipv4_address: ${METRICS_AGENT_IP:-10.89.250.2}
