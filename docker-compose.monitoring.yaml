@@ -45,6 +45,8 @@ services:
       - -remoteWrite.label=site=${METRICS_SITE:-}
       - -remoteWrite.tmpDataPath=/vmagent-data
       - -remoteWrite.maxDiskUsagePerURL=${METRICS_QUEUE_MAX:-512MB}
+      # The default is two queues per CPU core (40 on a 20-core host); the 64m budget is sized for a fixed small number.
+      - -remoteWrite.queues=2
       - -httpListenAddr=:8429
     volumes:
       - ./.docker/monitoring/vmagent:/etc/vmagent:ro
