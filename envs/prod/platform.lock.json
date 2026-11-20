@@ -1,15 +1,15 @@
 {
-  "platform_version": "1.27.8",
+  "platform_version": "1.28.0",
   "images": {
-    "csms-backend":       "ghcr.io/apostol-csms/csms-backend:1.27.8@sha256:0a6e8bb5242c2f0e30837b9e2bc6322acaaecf0c4e45dc77645e370c21d34bf0",
-    "csms-db":            "ghcr.io/apostol-csms/csms-db:1.27.8@sha256:45c5bb4b05c5ae0e9e6e2c16c335d88db65b0ea83ef0bfdbdde13a46bca5586f",
-    "csms-pay":           "ghcr.io/apostol-csms/csms-pay:1.27.8@sha256:8b650fb1557fc1607d658b7d972a9ef5ade108c5dd75452814f45fecfd38bb18",
-    "csms-driver":        "ghcr.io/apostol-csms/csms-driver:1.27.8@sha256:9d1c933f64c5c6c8e7456bd452ea3b3665cce9b8c1f8b9c8ef0e3fc79391de80",
-    "csms-webapp":        "ghcr.io/apostol-csms/csms-webapp:1.27.8@sha256:13c8bd2229bc4da4fcd4323508ec7098d21ee66ab315c12e3dbb893bfcd57c4a",
-    "csms-auth":          "ghcr.io/apostol-csms/csms-auth:1.27.8@sha256:19ac76f0db0ee51445d90a2373ad6db04ed594269431b1f70f0ece56dd701012",
-    "csms-ocpp":          "ghcr.io/apostol-csms/csms-ocpp:1.27.8@sha256:293df8c3fa8811da76fc1bbe44f398b75cbf5c50585339ab104c494792a35b63",
-    "csms-ai-service":    "ghcr.io/apostol-csms/csms-ai-service:1.27.8@sha256:6dfc2b97237ba857149b06a77bdd00c4e99a1b182ff5ecc94e2e5cfa64fcc717",
-    "csms-platform-service": "ghcr.io/apostol-csms/csms-platform-service:1.27.8@sha256:f90196cf0ef8186e329ff9c694a42b1e0323e7494ba11ee92330e72d2a497f9b",
-    "csms-report-service": "ghcr.io/apostol-csms/csms-report-service:1.27.8@sha256:6aa6c954035fc9c5233ecdf9217c6a6fa8bee7dcb4da8f615b8b1222d74f9974"
+    "csms-backend":       "ghcr.io/apostol-csms/csms-backend:1.28.0@sha256:71e792d02e795e08910e0ecc74a85c647b5a05d48cbe79ff0c1d863fa70e20b3",
+    "csms-db":            "ghcr.io/apostol-csms/csms-db:1.28.0@sha256:5befee742452a552b0ee8eaaa821de0a06bec7b793539722b955f3caa1f952cb",
+    "csms-pay":           "ghcr.io/apostol-csms/csms-pay:1.28.0@sha256:6988eb93c643c0bcc1c410b18f03294358fe81a66c0728924484fed1c200e6e6",
+    "csms-driver":        "ghcr.io/apostol-csms/csms-driver:1.28.0@sha256:7bc12e0e0743001e172fd7c25d63673068b9bf4049262d43e4200351d8de8f1e",
+    "csms-webapp":        "ghcr.io/apostol-csms/csms-webapp:1.28.0@sha256:7e065b30405ca8fb1489dee13be699d41b8a48c0812919c155c5154d9cb46b45",
+    "csms-auth":          "ghcr.io/apostol-csms/csms-auth:1.28.0@sha256:53cbf1403f9327abaa000ac649ca4588e5264fe902f331292ede50d10ad2b979",
+    "csms-ocpp":          "ghcr.io/apostol-csms/csms-ocpp:1.28.0@sha256:d3fd4a9eb1a1f7da984ec199b357a963451709b96eadd59008c0794f3deda337",
+    "csms-ai-service":    "ghcr.io/apostol-csms/csms-ai-service:1.28.0@sha256:78076a7ada9923bf893fce13c87167990bbfd4b48a9e1d74f8feccaf6e871328",
+    "csms-platform-service": "ghcr.io/apostol-csms/csms-platform-service:1.28.0@sha256:a81cc42129d299342cdba17c1a40d48da462fe242a2396b3be713815b32c8344",
+    "csms-report-service": "ghcr.io/apostol-csms/csms-report-service:1.28.0@sha256:c78e16625a557af8d3e597e4a9d786b61b2e22324551e1b47913ceb0c5b27d5c"
   }
 }
