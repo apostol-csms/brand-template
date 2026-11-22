@@ -14,3 +14,13 @@ body {
     margin: 0;
     background: #fafafa;
 }
+
+/* Dark scheme: Swagger UI sets html.dark-mode from the system preference. */
+html.dark-mode body {
+    background: inherit;
+}
+
+/* One installation, one server (/api/v1 or /api/v2 paths): nothing to choose. */
+.swagger-ui .scheme-container .servers {
+    display: none;
+}

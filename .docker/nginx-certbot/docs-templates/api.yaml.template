@@ -18551,7 +18551,7 @@ paths:
                       format: uuid
       responses:
         '200':
-          $ref: '#/components/schemas/list'
+          $ref: '#/components/responses/Result'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
