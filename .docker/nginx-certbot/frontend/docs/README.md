@@ -9,7 +9,7 @@ The documents are not kept here. `brands/_lib/mk-openapi.py` builds
 `go/openapi/api-v2.json` (`x-*` markers dropped; API v2 converted from OpenAPI 3.1 to 3.0.3 for this
 Swagger UI bundle). The image copies the templates to `/etc/nginx/docs.d`; `entrypoint.sh` renders
 `api.yaml`, `api-v2.yaml` and `oauth-config.js` into `/var/www/docs` with `envsubst`: client
-`web-$DOMAIN`, scope `https://$DOMAIN`.
+`web-$DOMAIN`, scope `https://cloud.$DOMAIN`.
 
 ```bash
 python3 brands/_lib/mk-openapi.py          # regenerate after a source changed

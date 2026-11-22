@@ -85,12 +85,12 @@ envsubst '$DOMAIN $NGINX_PROXY_PROTO_OPTS' \
 
 # Swagger UI on /docs/: the documents and the OAuth2 client of THIS deployment.
 # The image carries templates (see Dockerfile, brands/_lib/mk-openapi.py); the client is
-# web-<DOMAIN> and the scope is https://<DOMAIN>, both listed for the `web` client of the
+# web-<DOMAIN> and the scope is https://cloud.<DOMAIN> (the host of /docs/), both listed for the `web` client of the
 # backend OAuth2 configuration. The whitelist keeps every other `$` of the documents untouched.
 # A bad value must never stop the edge (stations and the API go through this nginx):
 # /docs/ simply stays without its documents and says why.
 export OAUTH_CLIENT_ID="web-${DOMAIN}"
-export OAUTH_SCOPE="https://${DOMAIN}"
+export OAUTH_SCOPE="https://cloud.${DOMAIN}"
 if [[ "$DOMAIN" =~ ^[A-Za-z0-9.-]+$ ]]; then
   for t in api.yaml api-v2.yaml oauth-config.js; do
     envsubst '$OAUTH_CLIENT_ID $OAUTH_SCOPE' < "/etc/nginx/docs.d/$t.template" > "/var/www/docs/$t"
