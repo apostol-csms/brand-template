@@ -31,6 +31,20 @@ COPY ./includes/ /etc/nginx/includes/
 
 # Копирование Swagger UI / API docs
 COPY ./frontend/docs /var/www/docs
+# Templates of the Swagger UI documents and its OAuth2 settings (brands/_lib/mk-openapi.py writes the
+# two documents); the entrypoint renders them into /var/www/docs per deployment. An image without a
+# usable document is refused here instead of serving a Swagger UI that cannot load its file.
+COPY ./docs-templates /etc/nginx/docs.d
+RUN set -e; \
+    for t in api.yaml api-v2.yaml oauth-config.js; do \
+      test -s "/etc/nginx/docs.d/$t.template" || { echo "docs: $t.template is missing or empty; run brands/_lib/mk-openapi.py" >&2; exit 1; }; \
+    done; \
+    for t in api.yaml api-v2.yaml; do \
+      grep -q '^openapi: ' "/etc/nginx/docs.d/$t.template" || { echo "docs: $t.template is not an OpenAPI document" >&2; exit 1; }; \
+      grep -q '${OAUTH_SCOPE}' "/etc/nginx/docs.d/$t.template" || { echo "docs: $t.template has no OAUTH_SCOPE placeholder" >&2; exit 1; }; \
+    done; \
+    [ "$(grep -c '^  /' /etc/nginx/docs.d/api.yaml.template)" -ge 900 ] || { echo "docs: api.yaml.template has fewer than 900 paths" >&2; exit 1; }; \
+    [ "$(grep -c '^  /' /etc/nginx/docs.d/api-v2.yaml.template)" -ge 130 ] || { echo "docs: api-v2.yaml.template has fewer than 130 paths" >&2; exit 1; }
 
 # Копирование сайтов
 COPY ./frontend /var/www/frontend

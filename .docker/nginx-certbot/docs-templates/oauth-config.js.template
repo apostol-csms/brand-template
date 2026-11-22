@@ -1,0 +1,1 @@
+window.DOCS_OAUTH = { clientId: "${OAUTH_CLIENT_ID}", scope: "${OAUTH_SCOPE}" };

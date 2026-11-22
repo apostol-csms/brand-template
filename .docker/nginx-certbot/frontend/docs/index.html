@@ -12,12 +12,17 @@
 
   <body>
     <div id="swagger-ui"></div>
+    <script src="./oauth-config.js"></script>
     <script src="./swagger-ui-bundle.js" charset="UTF-8"> </script>
     <script src="./swagger-ui-standalone-preset.js" charset="UTF-8"> </script>
     <script>
       window.onload = function() {
         window.ui = SwaggerUIBundle({
-          url: "/docs/api.yaml",
+          urls: [
+            { url: "/docs/api.yaml", name: "API v1" },
+            { url: "/docs/api-v2.yaml", name: "API v2" }
+          ],
+          "urls.primaryName": "API v1",
           dom_id: '#swagger-ui',
           deepLinking: true,
           presets: [
@@ -28,6 +33,13 @@
             SwaggerUIBundle.plugins.DownloadUrl
           ],
           layout: "StandaloneLayout"
+        });
+        // Client and scope of this deployment (rendered at container start).
+        var o = window.DOCS_OAUTH || {};
+        window.ui.initOAuth({
+          clientId: o.clientId,
+          scopes: o.scope ? [o.scope] : [],
+          usePkceWithAuthorizationCodeGrant: true
         });
       };
     </script>
