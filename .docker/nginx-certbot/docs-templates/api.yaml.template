@@ -6,8 +6,9 @@ info:
     this page is opened on.
 
 
-    Every operation is a POST with a JSON body. Authentication is OAuth 2.0 (authorization code, or password
-    for a client of your own); browser sessions use HttpOnly cookies. Use Authorize to sign in.'
+    Almost every operation is a POST with a JSON body; the few GET routes are marked as such. Authentication
+    is OAuth 2.0 (authorization code, or password for a client of your own) with a bearer access token;
+    browser sessions use HttpOnly cookies. To try a call, paste an access token into Authorize (bearerAuth).'
 servers:
 - url: /api/v1
   description: This installation

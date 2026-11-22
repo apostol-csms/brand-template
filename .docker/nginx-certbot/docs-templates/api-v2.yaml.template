@@ -9906,8 +9906,8 @@ info:
   title: CSMS REST API v2
   version: '2'
   description: 'The `/api/v2` REST API of the charging-station management system, as served at the host
-    this page is opened on. Every route needs `Authorization: Bearer <access token>`; use Authorize to
-    sign in. Every answer carries an `X-Request-Id`; every refusal is `application/problem+json`.'
+    this page is opened on. Every route needs `Authorization: Bearer <access token>`; paste a token into
+    Authorize (bearerAuth). Every answer carries an `X-Request-Id`; every refusal is `application/problem+json`.'
 openapi: 3.0.3
 paths:
   /api/v2/agents:
