@@ -41,6 +41,10 @@
 #   database       pg_stat_activity, pg_stat_database, pg_stat_statements,
 #                  db.log (E/W), db.api_log, pg_stat_user_tables — SELECT only, through
 #                  the container's local socket
+#   sessions       counters only, no names: stop commands waiting past their term or ended
+#                  without an answer, CostUpdated never answered by a station, closed charging
+#                  sessions with no invoice or an invoice neither paid nor closed
+#                  (ocpp.command, db.transaction, db.invoice) — flagged under `sessions`
 #   metrics        /metrics of backend and ocpp from inside their containers, two scrapes
 #
 # Exit code: 0 = the pass ran (flags are in the JSON); non-zero = it could not run (stderr says why).
@@ -637,7 +641,10 @@ select json_build_object('q','database','postmaster_start',pg_postmaster_start_t
   'size_mb',(pg_database_size(current_database())/1048576)::bigint,
   'row',(select row_to_json(d) from (select xact_commit,xact_rollback,deadlocks,conflicts,temp_files,temp_bytes,blks_read,blks_hit,stats_reset from pg_stat_database where datname=current_database()) d));
 select json_build_object('q','pgss','present',exists(select 1 from pg_extension where extname='pg_stat_statements'));
-select json_build_object('q','dblog','t',type,'text',left(text,300),'n',count(*),'first',min(datetime),'last',max(datetime)) from db.log where datetime>='@W@' and type in ('E','W') group by type,left(text,300) order by count(*) desc limit 300;
+select json_build_object('q','dblog','t',t,'text',x,'n',count(*),'first',min(d),'last',max(d)) from (select type t, datetime d, case when type='W' and code=4040 and event='offline' and text !~ '^CONFIG' and strpos(text,': ')>0 then split_part(text,': ',1)||': '||coalesce(array_length(string_to_array(rtrim(substr(text,strpos(text,': ')+2),'.'),', '),1),0) else left(text,300) end x from db.log where datetime>='@W@' and type in ('E','W')) s group by t,x order by count(*) desc limit 300;
+select json_build_object('q','stops','waiting',count(*) filter (where finished is null and created<now()-interval '120 seconds'),'failed',count(*) filter (where finished>='@W@' and status is distinct from 200),'total',count(*) filter (where created>='@W@')) from ocpp.command where action in ('RequestStopTransaction','RemoteStopTransaction') and (created>='@W@' or finished>='@W@' or (finished is null and created>now()-interval '1 day'));
+select json_build_object('q','cost','stations',count(*),'silent',count(*) filter (where ok=0 and n>=3)) from (select identity, count(*) n, count(*) filter (where status=200) ok from ocpp.command where action='CostUpdated' and created>='@W@'::timestamptz-interval '120 seconds' and created<now()-interval '120 seconds' group by identity) c;
+select json_build_object('q','sessions','closed',count(*),'no_invoice',count(*) filter (where t.client is not null and t.invoice is null),'paid',count(*) filter (where si.code='disabled'),'closed_inv',count(*) filter (where si.code='closed'),'failed_inv',count(*) filter (where si.code='failed'),'pending_inv',count(*) filter (where si.code='in_progress'),'unpaid_inv',count(*) filter (where si.code='created')) from db.transaction t join db.object o on o.id=t.id left join db.object oi on oi.id=t.invoice left join db.state si on si.id=oi.state where o.state_type=(select id from db.state_type where code='disabled') and o.udate>='@W@'::timestamptz-interval '15 minutes' and o.udate<now()-interval '15 minutes';
 select json_build_object('q','apilog','path',path,'n',count(*),'p50',round((percentile_cont(0.5) within group (order by extract(epoch from runtime)*1000))::numeric,1),'p95',round((percentile_cont(0.95) within group (order by extract(epoch from runtime)*1000))::numeric,1)) from db.api_log where datetime>='@W@' group by path order by count(*) desc limit 40;
 select json_build_object('q','tables','t',schemaname||'.'||relname,'seq_scan',seq_scan,'seq_tup_read',seq_tup_read,'idx_scan',idx_scan,'n_dead_tup',n_dead_tup,'n_live_tup',n_live_tup) from pg_stat_user_tables order by seq_tup_read desc limit 12;
 select json_build_object('q','tables','t',schemaname||'.'||relname,'seq_scan',seq_scan,'seq_tup_read',seq_tup_read,'idx_scan',idx_scan,'n_dead_tup',n_dead_tup,'n_live_tup',n_live_tup) from pg_stat_user_tables order by n_dead_tup desc limit 5;
@@ -660,7 +667,7 @@ select json_build_object('q','tables','t',schemaname||'.'||relname,'seq_scan',se
         rows = parse_psql(rc, out)
         db = {"ok": bool(rows), "name": dbname, "rows": rows}
         seen_q = {r.get("q") for r in rows}
-        for need in ("activity", "database", "pgss"):
+        for need in ("activity", "database", "pgss", "stops", "cost", "sessions"):
             if rows and need not in seen_q:
                 flag("warn", "database", "the %s query returned nothing" % need)
         if any(q.get("q") == "pgss" and q.get("present") for q in rows):
@@ -677,6 +684,7 @@ pgsd_new = {}
 pgss_new = {}
 tables_new = {}
 api_new = {}
+sessions_new = {}
 if db.get("ok"):
     rows = db["rows"]
     for r in rows:
@@ -723,6 +731,22 @@ if db.get("ok"):
                 e["first"] = r["first"]
         elif q == "apilog":
             api_new[mask(r["path"])[:120]] = {"calls": r["n"], "p50_ms": r["p50"], "p95_ms": r["p95"]}
+        elif q == "stops":
+            sessions_new["stops"] = {k: r[k] for k in ("waiting", "failed", "total")}
+            if r["waiting"]:
+                flag("warn", "sessions", "%d stop command(s) waiting past their term (%d stops in the window)" % (r["waiting"], r["total"]))
+            if r["failed"]:
+                flag("warn", "sessions", "%d stop command(s) finished without a 200 (no answer of the station, or a refusal) (%d stops in the window)" % (r["failed"], r["total"]))
+        elif q == "cost":
+            sessions_new["cost_updated"] = {k: r[k] for k in ("stations", "silent")}
+            if r["silent"]:
+                flag("warn", "sessions", "%d station(s) never answered CostUpdated in the window (3 or more sent)" % r["silent"])
+        elif q == "sessions":
+            sessions_new["closed"] = {k: r[k] for k in ("closed", "no_invoice", "paid", "closed_inv", "failed_inv", "pending_inv", "unpaid_inv")}
+            if r["no_invoice"]:
+                flag("warn", "sessions", "%d closed session(s) with a client but no invoice, closed over 15 min ago (of %d closed)" % (r["no_invoice"], r["closed"]))
+            if r["pending_inv"]:
+                flag("warn", "sessions", "%d closed session(s) whose invoice is still in progress, closed over 15 min ago (of %d closed)" % (r["pending_inv"], r["closed"]))
         elif q == "tables":
             tables_new[r["t"]] = {k: r[k] for k in ("seq_scan", "seq_tup_read", "idx_scan", "n_dead_tup")}
             tables_new[r["t"]]["n_live_tup"] = r.get("n_live_tup")
@@ -991,6 +1015,7 @@ rep = {
     "nginx": {"hosts": len(nginx), "requests": sum(v["req"] for v in nginx.values()),
               "5xx": sum(v["5xx"] for v in nginx.values()), "measured": bool(logdir) and any(v["parsed"] for v in scan_info.values())},
     "metrics": metrics_facts,
+    "sessions": sessions_new or None,
 }
 if not baseline and state.get("fingerprints_v") != 2:
     rep["note"] = "fingerprints of the previous record are not in this scheme: every error/warning below is new"
