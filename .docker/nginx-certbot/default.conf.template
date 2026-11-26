@@ -724,6 +724,8 @@ server {
     location = /metrics { return 404; }
 
     location / {
+        # error_log takes no format and quotes the request path: crit and above only here.
+        error_log /var/log/nginx/ws_error.log crit;
         proxy_pass $backend_upstream;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
